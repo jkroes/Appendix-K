@@ -104,6 +104,12 @@ parser.add_argument(
     help=(
         'Application method.\nAccepted values (include quotes):\n\t' +
         '\n\t'.join('"{0}"'.format(w) for w in app_methods)))
+parser.add_argument(
+    '--mebr',  # dest='mebr' seems to make this a required argument ...
+    action='store_true',  # ... even with action='store_true'
+    help=(
+        'This flag is required for any combined application of '
+        'chloropicrin and methyl bromide.'))
 args = parser.parse_args()
 
 # Read data tables and construct lookup for tables (see Appendix K, K-6)
@@ -115,9 +121,8 @@ inland_csv = [
     'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
     'Table6b.csv', 'Table7b.csv', 'Table8b.csv', 'Table9b.csv', 'Table10b.csv',
     'Table11b.csv', 'Table12.csv']
-assistance = (
-        'Please contact the California Department of Pesticide Regulation for '
-        'assistance.')
+assistance = ('Please contact the California Department of Pesticide '
+              'Regulation for assistance.')
 
 tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
 read_tables = functools.partial(read_tabular, tables_dir)
@@ -127,6 +132,12 @@ inland_tbls = [read_tables(csv) for csv in inland_csv]
 if args.app_method == app_methods[0]:
     print('TIF strip shallow injection is prohibited. ' + assistance)
     sys.exit()
+
+if args.app_method == app_methods[-1] and args.mebr:
+    print('Untarped drip fumigations are prohibited for chloropicrin '
+          'fumigations in combination with methyl bromide. ' + assistance)
+    sys.exit()
+
 app_methods = app_methods[1:]
 lookup = collections.defaultdict(dict)
 for i, v in enumerate(app_methods):
@@ -198,9 +209,17 @@ else:
 
 
 ##### Tests (within Spyder) #####
+# Return a value
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 40 600 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+# Throw error if returned value is NA in original csv (nan in loaded table)
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 40 1200 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+# Throw error about application rate
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 40 1500 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+# Throw error about acreage
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1200 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+# Throw error about application rate (but exits before error about acreage)
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1500 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+# Throw error about tif strip shallow injection
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1500 25 "tif strip shallow injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+# Throw error about untarped drip and methyl bromide
+#runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1500 25 "untarped drip" --mebr', wdir='C:/Users/jkroes/Desktop/Appendix K')
