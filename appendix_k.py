@@ -14,13 +14,15 @@ import pandas as pd
 import numpy as np
 import collections
 import sys
+import math
 
 
 def read_tabular(dir, csv):
     df = pd.read_csv(
             os.path.join(dir, csv),
-            index_col=0)
-    df.dropna(inplace=True)
+            index_col=0,
+            na_values='NA ')
+    df.dropna(inplace=True, how='all')
     # Leaving values as float since calculations may produce float results
     df.index = df.index.astype(int)
     df.columns = df.columns.astype(int)
@@ -124,7 +126,7 @@ for i, v in enumerate(app_methods):
     lookup[v]['coastal'] = coastal_tbls[i]
     lookup[v]['inland'] = inland_tbls[i]
 
-# Lookup the appropriate table, then buffer zone distance
+# Lookup the appropriate table
 if args.county in coastal:
     county_type = 'coastal'
 else:
@@ -145,27 +147,44 @@ if closest_rate < app_rate:
 if closest_size < args.app_block_size:
     closest_idx_size += 1
 
+assistance = (
+        'Please contact the California Department of Pesticide Regulation for '
+        'assistance.')
+error_msg = (
+        '{} ({} {}) exceeds maximum allowable {} ({} {}). ') + assistance
+
+
+# Lookup value in table
 try:
-    result = tbl.loc[
-                tbl.index[closest_idx_rate],
-                tbl.columns[closest_idx_size]]
+    col = tbl.loc[tbl.index[closest_idx_rate]]
 except IndexError as e:
-    print(
-        'Application rate ({} lbs AI/acre) exceeds maximum allowable rate ({} '
-        'lbs AI/acre). Please try again using a valid rate.'.format(
+    print(error_msg.format(
+            'Application rate',
             app_rate,
-            closest_rate))
+            'lbs AI/acre',
+            'rate',
+            closest_rate,
+            'lbs AI/acre'))
     sys.exit()
-except KeyError as e:
-    print(
-        'Application block size ({} acres) exceeds maximum acreage allowed '
-        "({} acres) for the tarpaulin type of the specified application "
-        'method. Please try again using a valid block size.'.format(
+try:
+    result = col[tbl.columns[closest_idx_size]]
+except IndexError as e:
+    print(error_msg.format(
+            'Application block size',
             args.app_block_size,
-            str(tbl.columns[-1])))
+            'acres',
+            'block size',
+            str(tbl.columns[-1]),
+            'acres'))
     sys.exit()
 
-print('Buffer zone distance in feet:', result)
+# Return results
+if math.isnan(result):
+    print('Value unavailable for inputs. ' + assistance)
+    sys.exit()
+else:
+    print('Buffer zone distance in feet: ' + str(result))
+
 
 ##### More info on... #####
 # Defaultdicts:
