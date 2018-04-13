@@ -43,9 +43,10 @@ coastal = [
     'monterey', 'orange', 'san diego', 'san francisco', 'san luis obispo',
     'san mateo', 'santa barbara', 'santa cruz', 'sonoma', 'ventura']
 app_methods = [
+    'tif strip shallow injection',  # TIF strip shallow injection prohibited
     'tif broadcast shank injection',
     'tif bed injection',
-    'tif strip deep injection',  # TIF strip shallow injection prohibited
+    'tif strip deep injection',
     'tif drip',
     'non-tif broadcast shank injection',
     'non-tif bed injection',
@@ -106,9 +107,6 @@ parser.add_argument(
 args = parser.parse_args()
 
 # Read data tables and construct lookup for tables (see Appendix K, K-6)
-tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
-read_tables = functools.partial(read_tabular, tables_dir)
-
 coastal_csv = [
     'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
     'Table6a.csv', 'Table7a.csv', 'Table8a.csv', 'Table9a.csv', 'Table10a.csv',
@@ -117,10 +115,19 @@ inland_csv = [
     'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
     'Table6b.csv', 'Table7b.csv', 'Table8b.csv', 'Table9b.csv', 'Table10b.csv',
     'Table11b.csv', 'Table12.csv']
+assistance = (
+        'Please contact the California Department of Pesticide Regulation for '
+        'assistance.')
 
+tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
+read_tables = functools.partial(read_tabular, tables_dir)
 coastal_tbls = [read_tables(csv) for csv in coastal_csv]
 inland_tbls = [read_tables(csv) for csv in inland_csv]
 
+if args.app_method == app_methods[0]:
+    print('TIF strip shallow injection is prohibited. ' + assistance)
+    sys.exit()
+app_methods = app_methods[1:]
 lookup = collections.defaultdict(dict)
 for i, v in enumerate(app_methods):
     lookup[v]['coastal'] = coastal_tbls[i]
@@ -144,17 +151,14 @@ closest_idx_size = np.where(tbl.columns == closest_size)[0][0]
 
 if closest_rate < app_rate:
     closest_idx_rate += 1
+
 if closest_size < args.app_block_size:
     closest_idx_size += 1
 
-assistance = (
-        'Please contact the California Department of Pesticide Regulation for '
-        'assistance.')
-error_msg = (
-        '{} ({} {}) exceeds maximum allowable {} ({} {}). ') + assistance
-
-
 # Lookup value in table
+error_msg = (
+    '{} ({} {}) exceeds maximum allowable {} ({} {}). ') + assistance
+
 try:
     col = tbl.loc[tbl.index[closest_idx_rate]]
 except IndexError as e:
@@ -166,6 +170,7 @@ except IndexError as e:
             closest_rate,
             'lbs AI/acre'))
     sys.exit()
+
 try:
     result = col[tbl.columns[closest_idx_size]]
 except IndexError as e:
@@ -191,9 +196,11 @@ else:
 ## https://www.accelebrate.com/blog/using-defaultdict-python/
 ## https://stackoverflow.com/questions/16333296/how-do-you-create-nested-dict-in-python
 
+
 ##### Tests (within Spyder) #####
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 40 600 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 40 1200 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 40 1500 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1200 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
 #runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1500 25 "untarped broadcast or strip deep injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
+#runfile('C:/Users/jkroes/Desktop/Appendix K/appendix_k.py', args='monterey 300 1500 25 "tif strip shallow injection"', wdir='C:/Users/jkroes/Desktop/Appendix K')
