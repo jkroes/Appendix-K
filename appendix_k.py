@@ -121,13 +121,14 @@ inland_csv = [
     'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
     'Table6b.csv', 'Table7b.csv', 'Table8b.csv', 'Table9b.csv', 'Table10b.csv',
     'Table11b.csv', 'Table12.csv']
-assistance = ('Please contact the California Department of Pesticide '
-              'Regulation for assistance.')
 
 tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
 read_tables = functools.partial(read_tabular, tables_dir)
 coastal_tbls = [read_tables(csv) for csv in coastal_csv]
 inland_tbls = [read_tables(csv) for csv in inland_csv]
+
+assistance = ('Please contact the California Department of Pesticide '
+              'Regulation for assistance.')
 
 if args.app_method == app_methods[0]:
     print('TIF strip shallow injection is prohibited. ' + assistance)
@@ -199,7 +200,12 @@ if math.isnan(result):
     print('Value unavailable for inputs. ' + assistance)
     sys.exit()
 else:
-    print('Buffer zone distance in feet: ' + str(result))
+    print('Buffer zone distance in feet: {}.\n\nNote that buffer zones may '
+          'need to be recalculated if buffer zones for two or more '
+          'applications overlap within 36 hours from the time earlier '
+          'applications are complete until the start of later applications. '
+          'These adjusted buffer zones can be calculated by running this '
+          'script with values for each such application.'.format(str(result)))
 
 
 ##### More info on... #####
