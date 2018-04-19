@@ -1,4 +1,5 @@
-#### Tests (within Spyder) #####
+#### Tests (requires a terminal) #####
+
 # Return value(s)
 python appendix_k.py --county "san bernadino" --app-details 0 0 0 "non-tif strip injection"
 python appendix_k.py --county monterey --app-details 40 600 25 "untarped broadcast or strip deep injection"
@@ -11,7 +12,7 @@ python appendix_k.py --county kern --app-details 35 1300 20 "untarped bed inject
 python appendix_k.py --county kern --app-details 35 1301 20 "untarped bed injection"
 
 # Throw error about application rate
-# (First run is valid; second inidcates that errors prevent printing otherwise
+# (First run is valid; 2nd, 3rd indicate that errors prevent printing otherwise
 #  valid results and that order doesn't matter)
 python appendix_k.py --county lassen --app-details 1 2140 5 "untarped drip"
 python appendix_k.py --county lassen --app-details 1 2141 5 "untarped drip" --app-details 1 2140 5 "untarped drip"
@@ -26,6 +27,10 @@ python appendix_k.py --county monterey --app-details 300 1500 25 "untarped broad
 
 # Throw error about prohibited application method
 python appendix_k.py --county sacramento --app-details 20 1500 14 "tif strip shallow injection"
+
+# !!!Recalculated values!!!
+python appendix_k.py --recalc --county monterey --app-details 20 600 25 "untarped broadcast or strip deep injection" --app-details 5 600 15 "untarped bed injection" --app-details 10 1750 10 "tif drip"
+
 
 # Throw error about untarped drip and methyl bromide
 # monterey 300 1500 25 "untarped drip" --mebr
