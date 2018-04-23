@@ -1,5 +1,9 @@
 #### Tests (requires a terminal) #####
 
+# Display help
+python appendix_k.py -h
+
+
 # Return value(s)
 python appendix_k.py --county "san bernadino" --app-details 0 0 0 "non-tif strip injection"
 python appendix_k.py --county monterey --app-details 40 600 25 "untarped broadcast or strip deep injection"

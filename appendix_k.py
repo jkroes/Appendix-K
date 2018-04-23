@@ -19,13 +19,15 @@ import math
 
 def parse_arguments(methods, choices):
     description =\
-    '''Calculate buffer zone as part of recommended permit conditions for
+    '''
+    Calculate buffer zone as part of recommended permit conditions for
     chlorpicrin and chlorpicrin/1,3-D products, as outlined in Pesticide Use
     Enforcement Program Standards Compendium Volume 3, Restricted Materials and
     Permitting, Appendix K.'''
 
     recalc_msg =\
-    '''Buffer zones may need to be recalculated if buffer zones for two
+    '''
+    Buffer zones may need to be recalculated if buffer zones for two
     or more applications overlap within 36 hours from the time earlier
     applications are complete until the start of later applications. These
     adjusted buffer zones can be calculated by running this script with this
@@ -37,11 +39,13 @@ def parse_arguments(methods, choices):
     '''
 
     county_msg =\
-    '''County in which the application takes place, in lowercase letters and
+    '''
+    County in which the application takes place, in lowercase letters and
     surrounded by quotes.'''
 
     app_msg =\
-    '''Application details. For each application, use this flag with the four
+    '''
+    Application details. For each application, use this flag with the four
     arguments below:
 
     APP_BLOCK_SIZE: Size of the application block, given in acres.
@@ -56,7 +60,7 @@ def parse_arguments(methods, choices):
     given as a number between 0 and 100 without a percentage sign.
 
     APP_METHOD: Application method, chosen from the list below:
-            ''' + '\n\t'.join('"{0}"'.format(w) for w in methods)
+        ''' + '\n\t'.join('"{0}"'.format(w) for w in methods)
 
     parser = argparse.ArgumentParser(
                 description=description,
@@ -108,9 +112,9 @@ def read_tables(valid_methods):
         'Table10b.csv', 'Table11b.csv', 'Table12.csv']
 
     tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
-    read_tables = functools.partial(read_tabular, tables_dir)
-    coastal_tbls = [read_tables(csv) for csv in coastal_csv]
-    inland_tbls = [read_tables(csv) for csv in inland_csv]
+    read_tabular = functools.partial(read_tabular, tables_dir)
+    coastal_tbls = [read_tabular(csv) for csv in coastal_csv]
+    inland_tbls = [read_tabular(csv) for csv in inland_csv]
 
     lookup_tbl = collections.defaultdict(dict)
     for i, v in enumerate(valid_methods):
@@ -156,9 +160,10 @@ def calculate_buffer(app, county_type, lookup, methods, assist):
         sys.exit()
 #    if app['app_method'] == methods[-1] and apps.mebr:
 #        print('Untarped drip fumigations are prohibited for chloropicrin '
-#              'fumigations in combination with methyl bromide. ' + assistance)
+#              'fumigations in combination with methyl bromide. ' + assist)
 #        sys.exit()
 
+    # Lookup correct table for combination of application method and county
     tbl = lookup[app['app_method']][county_type]
 
     # Table captions: "Round up to the nearest rate and block size, where
@@ -176,7 +181,8 @@ def calculate_buffer(app, county_type, lookup, methods, assist):
     if closest_size < app['app_block_size']:
         closest_idx_size += 1
 
-    # Lookup value in table
+    # Lookup value in table and verify that application rate and block size
+    # are within the ranges given by table's index and column headers
     error_msg = (
         '{} ({} {}) exceeds maximum allowable {}\n({} {}). ') + assist
 
@@ -204,7 +210,7 @@ def calculate_buffer(app, county_type, lookup, methods, assist):
                 'acres'))
         sys.exit()
 
-    # Return results
+    # Verify that value is not NA and if so, return results
     if math.isnan(result):
         print('Value unavailable for inputs. ' + assist)
         sys.exit()
@@ -256,10 +262,8 @@ def main():
     keys = [
         'app_block_size', 'product_app_rate', 'percent_active', 'app_method']
 
-    assistance =\
-    '''
-    Please contact the California Department of Pesticide Regulation for
-    assistance.'''
+    assistance =('Please contact the California Department '
+                 'of Pesticide Regulation for assistance.')
 
     mod_msg =\
     '''NOTE: Displayed "inputs" may differ from user inputs for overlapping non-
@@ -283,21 +287,24 @@ def main():
 
     lookup_table = read_tables(app_methods[1:])
 
+    # Convert parsed options to list of application dicts
     applications = []
     for values in args.app_details:
         values[0:3] = [float(v) for v in values[0:3]]
         applications.append(dict(zip(keys, values)))
 
+    # Separate applications into lists of tif and untarped/non-tif
     tif = app_methods[1:5]
     tif_apps = [a for a in applications if a['app_method'] in tif]
     other_apps = [a for a in applications if a['app_method'] not in tif]
 
-    # Lookup the appropriate table
+    # Lookup the appropriate table for the county
     if args.county in coastal:
         cty_type = 'coastal'
     if args.county in inland:
         cty_type = 'inland'
 
+    # Check acreage, (re)calculate buffers, and print results
     args_cb = [cty_type, lookup_table, app_methods, assistance]
     display_results = functools.partial(print_results, keys)
     if tif_apps:
