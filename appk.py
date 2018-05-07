@@ -15,9 +15,10 @@ import numpy as np
 import collections
 import sys
 import math
+import konstants
 
 
-def parse_arguments(methods, choices):
+def parse_arguments(methods, choices, to_parse=None):
     description =\
     '''
     Calculate buffer zone as part of recommended permit conditions for
@@ -84,7 +85,7 @@ def parse_arguments(methods, choices):
                                     'APP_METHOD'),
                            help=app_msg)
 
-    return parser.parse_args()
+    return parser.parse_args(to_parse) if to_parse else parser.parse_args()
 
 
 def read_tables(valid_methods):
@@ -102,19 +103,10 @@ def read_tables(valid_methods):
         df.columns = df.columns.astype(int)
         return df
 
-    coastal_csv = [
-        'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
-        'Table6a.csv', 'Table7a.csv', 'Table8a.csv', 'Table9a.csv',
-        'Table10a.csv', 'Table11a.csv', 'Table12.csv']
-    inland_csv = [
-        'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
-        'Table6b.csv', 'Table7b.csv', 'Table8b.csv', 'Table9b.csv',
-        'Table10b.csv', 'Table11b.csv', 'Table12.csv']
-
     tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
     read_tabular = functools.partial(read_tabular, tables_dir)
-    coastal_tbls = [read_tabular(csv) for csv in coastal_csv]
-    inland_tbls = [read_tabular(csv) for csv in inland_csv]
+    coastal_tbls = [read_tabular(csv) for csv in konstants.coastal_csv]
+    inland_tbls = [read_tabular(csv) for csv in konstants.inland_csv]
 
     lookup_tbl = collections.defaultdict(dict)
     for i, v in enumerate(valid_methods):
@@ -127,7 +119,7 @@ def read_tables(valid_methods):
 def check_acreage(apps, limit, string, assist):
     acreage = sum(a['app_block_size'] for a in apps)
     if acreage > limit:
-        print('Combined {} acreage cannot exceed 60 acres.'
+        print('Combined {} acreage cannot exceed 60 acres. '
               .format(string) + assist)
         sys.exit()
 
@@ -158,6 +150,8 @@ def calculate_buffer(app, county_type, lookup, methods, assist):
     if app['app_method'] == methods[0]:
         print('TIF strip shallow injection is prohibited. ' + assist)
         sys.exit()
+
+# Legacy from early work on integrating methyl bromide calculations
 #    if app['app_method'] == methods[-1] and apps.mebr:
 #        print('Untarped drip fumigations are prohibited for chloropicrin '
 #              'fumigations in combination with methyl bromide. ' + assist)
@@ -184,7 +178,7 @@ def calculate_buffer(app, county_type, lookup, methods, assist):
     # Lookup value in table and verify that application rate and block size
     # are within the ranges given by table's index and column headers
     error_msg = (
-        '{} ({} {}) exceeds maximum allowable {}\n({} {}). ') + assist
+        '{} ({} {}) exceeds maximum allowable {} ({} {}). ') + assist
 
     try:
         col = tbl.loc[tbl.index[closest_idx_rate]]
@@ -229,102 +223,65 @@ def print_results(k, string, apps, buffers):
         print('Application buffer-zone distance: {} feet\n'
               .format(buffers[i]))
 
-def main():
-    app_methods = [
-        'tif strip shallow injection',  # PROHIBITED METHOD
-        'tif broadcast shank injection',
-        'tif bed injection',
-        'tif strip deep injection',
-        'tif drip',
-        'non-tif broadcast shank injection',
-        'non-tif bed injection',
-        'non-tif strip injection',  # Doc doesn't specify shallow or deep
-        'non-tif drip',
-        'untarped broadcast or strip shallow injection',  # u.b. shallow?
-        'untarped broadcast or strip deep injection',  # u.b. deep?
-        'untarped bed injection',
-        'untarped drip']  # Split into 2 arguments with fewer options?
 
-    inland = [
-        'alameda', 'alpine', 'amador', 'butte', 'calaveras', 'colusa',
-        'contra costa', 'el dorado', 'fresno', 'glenn', 'imperial', 'inyo',
-        'kern', 'kings', 'lake', 'lassen', 'madera', 'mariposa', 'merced',
-        'modoc', 'mono', 'napa', 'nevada', 'placer', 'plumas', 'riverside',
-        'sacramento', 'san benito', 'san bernadino', 'san joaquin',
-        'santa clara', 'shasta', 'sierra', 'siskiyou', 'solano', 'stanislaus',
-        'sutter', 'tehama', 'trinity', 'tulare', 'tuolumne', 'yolo', 'yuba']
+def main(args):
 
-    coastal = [
-        'del norte', 'humboldt', 'los angeles', 'marin', 'mendocino',
-        'monterey', 'orange', 'san diego', 'san francisco', 'san luis obispo',
-        'san mateo', 'santa barbara', 'santa cruz', 'sonoma', 'ventura']
-
-    keys = [
-        'app_block_size', 'product_app_rate', 'percent_active', 'app_method']
-
-    assistance =('Please contact the California Department '
-                 'of Pesticide Regulation for assistance.')
-
-    mod_msg =\
-    '''NOTE: Displayed "inputs" may differ from user inputs for overlapping non-
-    TIF or untarped application blocks. A single buffer zone is calculated based
-    on total acreage and largest application rate, using the table for whichever of
-    the application methods specified by the user returns the largest buffer-zone
-    distance. The inputs listed here are the inputs used to find this buffer-zone
-    distance.
-    '''
-
-    overlap_msg =\
-    '''NOTE: Buffer zones may need to be recalculated if buffer zones for two
-    or more applications overlap within 36 hours from the time earlier applications
-    are complete until the start of later applications. These adjusted buffer zones
-    can be calculated by running this script with additional arguments. Please
-    type 'python appendix_k.py -h' into the Terminal and view the section for
-    optional arguments.
-    '''
-
-    args = parse_arguments(app_methods, inland + coastal)
-
-    lookup_table = read_tables(app_methods[1:])
+    lookup_table = read_tables(konstants.app_methods[1:])
 
     # Convert parsed options to list of application dicts
     applications = []
     for values in args.app_details:
         values[0:3] = [float(v) for v in values[0:3]]
-        applications.append(dict(zip(keys, values)))
+        applications.append(dict(zip(konstants.keys, values)))
 
     # Separate applications into lists of tif and untarped/non-tif
-    tif = app_methods[1:5]
+    tif = konstants.app_methods[1:5]
     tif_apps = [a for a in applications if a['app_method'] in tif]
     other_apps = [a for a in applications if a['app_method'] not in tif]
 
     # Lookup the appropriate table for the county
-    if args.county in coastal:
+    if args.county in konstants.coastal:
         cty_type = 'coastal'
-    if args.county in inland:
+    if args.county in konstants.inland:
         cty_type = 'inland'
 
     # Check acreage, (re)calculate buffers, and print results
-    args_cb = [cty_type, lookup_table, app_methods, assistance]
-    display_results = functools.partial(print_results, keys)
+    args_cb = [cty_type, lookup_table, konstants.app_methods,
+               konstants.assistance]
     if tif_apps:
-        check_acreage(tif_apps, 60, 'TIF', assistance)
+        check_acreage(tif_apps, 60, 'TIF', konstants.assistance)
         tif_buffers = [calculate_buffer(app, *args_cb) for app in tif_apps]
-        display_results('TIF application inputs:', tif_apps, tif_buffers)
+    else:
+        tif_buffers = []
     if other_apps:
-        check_acreage(other_apps, 40, 'non-TIF or untarped', assistance)
+        check_acreage(other_apps, 40, 'non-TIF or untarped',
+                      konstants.assistance)
         other_buffers = [calculate_buffer(app, *args_cb) for app in other_apps]
         if args.recalc:
             other_buffers, other_apps = recalculate(other_apps, args_cb)
-            print(mod_msg)
-        else:
-            print(overlap_msg)
-        display_results('Non-TIF and untarped application inputs:',
-                        other_apps, other_buffers)
+    else:
+        other_buffers = []
 
+    return list(zip(tif_buffers, tif_apps)), list(zip(other_buffers, other_apps))
 
-if __name__ == "__main__":
-    main()
+# The code below won't run on it's own because of last minute moving around of
+# code snippets for printing that were in main. Not super important, and
+# any print formatting should be done with the textwrap module/package in the
+# future.
+# if __name__ == "__main__":
+#     args = parse_arguments(konstants.app_methods,
+#                            konstants.inland + konstants.coastal)
+#     tif, other = main(args)
+#     print(tif)
+#     print(other)
+#     # display_results = functools.partial(print_results, konstants.keys)
+#     # display_results('TIF application inputs:', tif_apps, tif_buffers)
+#     # display_results('Non-TIF and untarped application inputs:',
+#     #                 other_apps, other_buffers)
+#     # if args.recalc:
+#     #     print(konstants.mod_msg)
+#     # else:
+#     #     print(konstants.overlap_msg)
 
 ##### More info on... #####
 # Defaultdicts:

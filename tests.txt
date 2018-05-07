@@ -10,6 +10,9 @@ python appendix_k.py --county monterey --app-details 40 600 25 "untarped broadca
 python appendix_k.py --county monterey --app-details 40 600 25 "untarped broadcast or strip deep injection" --app-details 10 1750 10 "tif drip"
 python appendix_k.py --county "san luis obispo" --app-details 9.5 340 50 "non-tif drip"
 
+# Invalid choices
+python appendix_k.py --county "san bernadi" --app-details 0 0 0 "non-tif strip injection"
+
 # Throw error if returned value is NA in original csv (nan in loaded table)
 # (Valid run illustrates rounding behavior)
 python appendix_k.py --county kern --app-details 35 1300 20 "untarped bed injection"
