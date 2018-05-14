@@ -14,7 +14,6 @@ import functools
 import sys
 from io import StringIO
 import contextlib
-import argparse
 import konstants
 import appk
 import os
@@ -152,57 +151,81 @@ class MainFrame(ttk.Frame):
         self.remover = ttk.Button(self, text='-', command=self.rm_button)
         self.submitter = ttk.Button(self, text='Calculate buffer zones',
             command=self._run)
+        self.movable = [self.adder, self.remover, self.submitter]
 
         # Other instance variables
         self.root = self.winfo_toplevel()
         self.applications = []
-        self.details = {}  # !Dict is necessary b/c details are only added as
-        # application buttons are clicked, meaning order and even existence
-        # are not guaranteed at deletion time (see rm_button)
+        self.details = []
 
     def add_button(self):
-        '''Add button for an application'''
-        row = len(self.applications) + 3
-        text = 'Application {} Details'.format(str(row-2))
-        button = ttk.Button(self, text=text,
-            command=lambda idx=len(self.applications): self._add_details(idx))
+        '''Add button for an application, provided details have been added'''
+        if self.applications:
+           if not self._verify_details():
+               return
+           if not self._verify_all_details():
+               return
+           
+        app_number = len(self.applications) + 1
+        text = 'Application {} Details'.format(app_number)
+        idx = len(self.applications)
+        button = ttk.Button(
+            self, text=text, command=lambda idx=idx: self._add_details(idx))
         self.applications.append(button)
-        button.grid(row=row, column=2, sticky='WE')
-        self._adjust_buttons(row)
+        
+        self.texts = ['Application block size (acres):',
+                 'Product application rate (lbs/acre):',
+                 'Percent active ingredient:',
+                 'Application method:']
+        button.details_labels = [ttk.Label(self, text=t) for t in self.texts]
+        button.details = [ttk.Label(self, text='') for t in self.texts]
+
+        button_row = len(self.movable) + (idx * (len(self.texts) + 1))
+        button.grid(row=button_row, column=2, sticky='WE')
+        for i, dl in enumerate(button.details_labels):
+            dl.grid(row=button_row + i + 1, column=2, sticky='W')
+            button.details[i].grid(
+                row=button_row + i + 1, column=3, sticky='W')
+            
+        self._adjust_buttons(button_row)
 
     def rm_button(self):
-        '''Remove button for an application'''
-        print(list(range(len(self.applications))))
-        print(self.details.keys())
-        idx = len(self.applications) - 1
-        if idx > 0:
-            self._adjust_buttons(idx+2)
-        self.applications[idx].destroy()
-        self.applications.pop()
-        if self.details.get(idx):  # dict.get(), not widget.get()
-            win = self.details.pop(idx)
-            win.destroy()
-        print(list(range(len(self.applications))))
-        print(self.details.keys())
-        print('\n')
+        '''Remove newest app button and associated widgets, if multiple
+        buttons exist'''
+        idx = len(self.applications)
+        if idx > 1:
+            button = self.applications[-1]
+            for i, dl in enumerate(button.details_labels):
+                dl.destroy()
+                button.details[i].destroy()
+            if len(self.details) == len(self.applications):
+                x = self.details.pop()
+                x.destroy()
+            x = self.applications.pop()
+            x.destroy()
+            button_row = \
+                len(self.movable) + ((idx - 2) * (len(self.texts) + 1))
+            self._adjust_buttons(button_row)
 
     def _adjust_buttons(self, row):
-        '''Adjust other buttons to accommodate a new application button'''
+        '''Adjust other buttons to accommodate new/rm application button'''
         self.adder.grid(row=row, column=0)
         self.remover.grid(row=row, column=1)
-        self.submitter.grid(row=row+1, column=2, sticky='WE',
+        offset = row + len(self.texts) + 1
+        self.submitter.grid(row=offset, column=2, sticky='WE',
             pady=25)  # Add space between rows. (padx shirnks widget width.)
         if not hasattr(self, 'submitter_help'):  # The only help button that
             self.submitter_help = make_help_label(  # moves around
-                self, row=row+1, msg=konstants.app_msg, photo=self.photo)
+                self, row=offset, msg=konstants.app_msg, photo=self.photo)
         else:
-            self.submitter_help.grid(row=row+1, column=3, sticky='W')
+            self.submitter_help.grid(row=offset, column=3, sticky='W')
 
     def _add_details(self, idx):
         '''Open window to input application-specific parameters'''
         self.hide()
-        if not self.details.get(idx):  # dict.get(), not widget.get()
-            self.details[idx] = Details(self, idx+1)
+        if not self.details[idx:idx + 1]:
+            app_number = idx + 1
+            self.details.append(Details(self, app_number))
             # NOTE: Instantiation will show window automatically
         else:
             self.details[idx].show()
@@ -220,39 +243,19 @@ class MainFrame(ttk.Frame):
                 else konstants.inland_csv)
             csv = csvs[konstants.app_methods[1:].index(method)]
             return csv.split('.')[0]
-
-        # Verify each application is associated with a details window
-        if len(self.applications) != len(self.details):
-            self._prompt_add_details()
+        
+        # Verify inputs and being argument processing
+        if not self._verify_details():
             return
-
-        app_args = [['--app-details'] + [tk.Entry.get(i) for i in [
-            d.app_block_size, d.app_rate, d.percent_active, d.app_method]
-            ] for d in self.details.values()]
-
-        # Verify that each application with a details window has all details
-        for app_arg in app_args:
-            if not all(app_arg):
-                self._prompt_add_all_details()
-                return
-            # Verify that application method has been fully entered
-            if app_arg[-1] not in konstants.app_methods:
-                self._prompt_specify_method()
-                return
-
-        # Verify that the county has been entered (fully)
-        county = self.county.get()
-        if not county or county not in self.counties:
-            self._prompt_add_county()
+        app_args = self._verify_all_details()
+        if not app_args:
             return
-
+        county = self._verify_county()
+        if not county:
+            return
+    
         # Process arguments and feed to buffer-zone-calculation routine in
-        # appk.py, capturing and displaying errors on stdout or else results
-        # template2 = ('Buffer-zone distance: {} feet. This was caculated '
-        #      'using {}. The table was selected from county ({}) and '
-        #      'application method ({}). Buffer-zone distance was '
-        #      'selected using application rate ({} lbs A.I./acre) '
-        #      'and application-block size ({} acres).')
+        # appk.py, capturing and displaying errors or else results
         template = ('Buffer zone distance: {} feet\n'
                     '(Calculated using {}.)\n\n'
                     'Application details:\n\n'
@@ -281,6 +284,37 @@ class MainFrame(ttk.Frame):
                             t[1]['product_app_rate'] * t[1]['percent_active']\
                                 / 100,
                             method))
+
+    def _verify_details(self):
+        '''Verify each application is associated with a details window'''
+        if len(self.applications) != len(self.details):
+            self._prompt_add_details()
+            return False
+        return True
+
+    def _verify_all_details(self):
+        '''Verify that each application with a details window has all 
+        details'''
+        app_args = [['--app-details'] + [tk.Entry.get(i) for i in [
+            d.app_block_size, d.app_rate, d.percent_active, d.app_method]
+            ] for d in self.details]
+        for app_arg in app_args:
+            if not all(app_arg):
+                self._prompt_add_all_details()
+                return False
+            # Verify that application method has been fully entered
+            if app_arg[-1] not in konstants.app_methods:
+                self._prompt_specify_method()
+                return False       
+        return app_args
+    
+    def _verify_county(self):
+        '''Verify that the county has been entered (fully)'''
+        county = self.county.get()
+        if not county or county not in self.counties:
+            self._prompt_add_county()
+            return False
+        return county
 
     def hide(self):
         self.root.withdraw()
@@ -336,14 +370,15 @@ class Details(tk.Toplevel):
         self.mainframe = mainframe
         self.geometry(mainframe.root.geometry())
         self.title('Appendix K - Application {} Details'.format(app_number))
+        self.app_number = app_number
 
         # Create and position label widgets
         texts = ['Application block size (acres):',
                 'Product application rate (lbs/acre):',
                 'Percent active ingredient:',
                 'Application method:']
-        [ttk.Label(self, text=t).grid(row=i, column=0, sticky='W')
-            for i, t in enumerate(texts)]  # The list itself isn't needed
+        for i, t in enumerate(texts):
+            ttk.Label(self, text=t).grid(row=i, column=0, sticky='W')
 
         # Create entry widgets
         vcmd = (self.register(self._validate_entry), '%P', '%S')
@@ -397,6 +432,14 @@ class Details(tk.Toplevel):
         self.deiconify()
 
     def hide(self):
+        '''Update mainframe labels with input details and hide window'''
+        idx = self.app_number - 1
+        button = self.mainframe.applications[idx]
+        attrs = [self.app_block_size, self.app_rate, self.percent_active,
+                 self.app_method]
+        for i, d in enumerate(button.details):
+            d.configure(text=attrs[i].get()) 
+            
         self.withdraw()
 
     def _close(self):
@@ -410,7 +453,7 @@ class Details(tk.Toplevel):
 #==============================================================================
 root = tk.Tk()
 root.title('Appendix K')
-root.geometry("500x400")
+root.geometry("600x400")
 center_top_level(root)
 
 #==============================================================================
