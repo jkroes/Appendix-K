@@ -156,7 +156,9 @@ class MainFrame(ttk.Frame):
         # Other instance variables
         self.root = self.winfo_toplevel()
         self.applications = []
-        self.details = {}
+        self.details = {}  # !Dict is necessary b/c details are only added as
+        # application buttons are clicked, meaning order and even existence
+        # are not guaranteed at deletion time (see rm_button)
 
     def add_button(self):
         '''Add button for an application'''
@@ -170,6 +172,8 @@ class MainFrame(ttk.Frame):
 
     def rm_button(self):
         '''Remove button for an application'''
+        print(list(range(len(self.applications))))
+        print(self.details.keys())
         idx = len(self.applications) - 1
         if idx > 0:
             self._adjust_buttons(idx+2)
@@ -178,6 +182,9 @@ class MainFrame(ttk.Frame):
         if self.details.get(idx):  # dict.get(), not widget.get()
             win = self.details.pop(idx)
             win.destroy()
+        print(list(range(len(self.applications))))
+        print(self.details.keys())
+        print('\n')
 
     def _adjust_buttons(self, row):
         '''Adjust other buttons to accommodate a new application button'''
