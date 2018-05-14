@@ -1,3 +1,10 @@
 *.csv
 *.xlsx
 __pycache__/
+Backup/
+Lib/
+Scripts/
+build/
+dist/
+*.json
+*.cfg

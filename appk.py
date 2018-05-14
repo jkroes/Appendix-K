@@ -101,9 +101,13 @@ def read_tables(valid_methods):
         # Leaving values as float since calculations may produce float results
         df.index = df.index.astype(int)
         df.columns = df.columns.astype(int)
+        
         return df
-
-    tables_dir = os.path.join(os.getcwd(), 'Tables', '112017')
+    try:
+        base_path = sys._MEIPASS
+    except:
+        base_path = os.path.abspath('.')
+    tables_dir = os.path.join(base_path, 'Tables', '112017')
     read_tabular = functools.partial(read_tabular, tables_dir)
     coastal_tbls = [read_tabular(csv) for csv in konstants.coastal_csv]
     inland_tbls = [read_tabular(csv) for csv in konstants.inland_csv]
@@ -119,8 +123,8 @@ def read_tables(valid_methods):
 def check_acreage(apps, limit, string, assist):
     acreage = sum(a['app_block_size'] for a in apps)
     if acreage > limit:
-        print('Combined {} acreage cannot exceed 60 acres. '
-              .format(string) + assist)
+        print('Combined {} acreage cannot exceed {} acres. '
+              .format(string, limit) + assist)
         sys.exit()
 
 # For overlapping non-TIF or untarped applications, each application block

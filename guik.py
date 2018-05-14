@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Author: Justin Lawrence Kroes
 Agency: Department of Pesticide Regulation
@@ -17,6 +17,7 @@ import contextlib
 import argparse
 import konstants
 import appk
+import os
 
 
 def center_top_level(toplevel):
@@ -61,6 +62,7 @@ def make_help_label(self, row, msg, photo):
     l = ttk.Label(self, image=photo)
     l.grid(row=row, column=3, sticky='W')
     l.bind('<Button-1>', functools.partial(show_help, msg=msg))
+    return l
 
 
 def readDetailsFromFile():
@@ -118,8 +120,9 @@ class MainFrame(ttk.Frame):
 
         # Create and position mainframe labels
         texts = ['County:', 'Overlapping applications:', 'Applications:']
-        [ttk.Label(self, text=t).grid(row=i, column=0, columnspan=2, sticky='W')
-            for i, t in enumerate(texts)]  # The list itself isn't needed
+        for i,t in enumerate(texts):
+            ttk.Label(self, text=t).grid(
+                    row=i, column=0, columnspan=2, sticky='W')
 
         # Create and position mainframe county combobox
         vcmd = (self.register(self._validate_county), '%P')
@@ -127,15 +130,19 @@ class MainFrame(ttk.Frame):
             validatecommand=vcmd)
         self.county.grid(row=0, column=2, sticky='WE')
 
-        # Create and position mainframe recalculate checkbox
+        # Create and position mainframe checkbox toggling overlap calc.
         self.var = tk.IntVar()
         self.overlap = ttk.Checkbutton(self, variable=self.var)
         self.overlap.grid(row=1, column=2, sticky='W')
         # self.overlap.invoke()  # Toggles state of Checkbutton
 
         # Create, position, and bind help labels:
-        # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
-        self.photo = tk.PhotoImage(file='help.gif').subsample(30,30)
+        try:  # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
+            base_path = sys._MEIPASS
+        except:
+            base_path = os.path.abspath('.')
+        photo_path = os.path.join(base_path, 'help.gif')
+        self.photo = tk.PhotoImage(file=photo_path).subsample(30,30)
         msgs = [konstants.county_msg, konstants.overlap_msg]
         for i in range(0, 2):
             make_help_label(self, row=i, msg=msgs[i], photo=self.photo)
@@ -178,8 +185,11 @@ class MainFrame(ttk.Frame):
         self.remover.grid(row=row, column=1)
         self.submitter.grid(row=row+1, column=2, sticky='WE',
             pady=25)  # Add space between rows. (padx shirnks widget width.)
-        make_help_label(self, row=row+1, msg=konstants.app_msg,
-            photo=self.photo)
+        if not hasattr(self, 'submitter_help'):  # The only help button that
+            self.submitter_help = make_help_label(  # moves around
+                self, row=row+1, msg=konstants.app_msg, photo=self.photo)
+        else:
+            self.submitter_help.grid(row=row+1, column=3, sticky='W')
 
     def _add_details(self, idx):
         '''Open window to input application-specific parameters'''
@@ -230,7 +240,18 @@ class MainFrame(ttk.Frame):
             return
 
         # Process arguments and feed to buffer-zone-calculation routine in
-        # appk.py, capturing and displaying errors on stdout
+        # appk.py, capturing and displaying errors on stdout or else results
+        # template2 = ('Buffer-zone distance: {} feet. This was caculated '
+        #      'using {}. The table was selected from county ({}) and '
+        #      'application method ({}). Buffer-zone distance was '
+        #      'selected using application rate ({} lbs A.I./acre) '
+        #      'and application-block size ({} acres).')
+        template = ('Buffer zone distance: {} feet\n'
+                    '(Calculated using {}.)\n\n'
+                    'Application details:\n\n'
+                    'Application block size (acres):\n{}\n'
+                    'Application rate (lbs A.I./acre):\n{}\n'
+                    'Application method:\n{}\n')
         args = ['--county', county] + [elem for li in app_args for elem in li]
         args = ['--recalc'] + args if self.var.get() else args
         parsed_args = appk.parse_arguments(
@@ -240,25 +261,19 @@ class MainFrame(ttk.Frame):
         out = ''.join(out)
         if out:
             self._prompt(out)
-
-        # Display results to user
-        template = ('Buffer zone distance: {} feet\n'
-                    '(Calculated using {}.)\n\n'
-                    'Application details:\n\n'
-                    'Application block size (acres):\n{}\n'
-                    'Product application rate (lbs/acre):\n{}\n'
-                    'Percent active ingredient:\n{}\n'
-                    'Application method:\n{}\n')
-        if self.var.get():
-            self._show_results(konstants.mod_msg)
-        for t in tif + other:
-            method = t[1]['app_method']
-            self._show_results(template.format(t[0],
-                                               tbl_num(method, county),
-                                               t[1]['app_block_size'],
-                                               t[1]['product_app_rate'],
-                                               t[1]['percent_active'],
-                                               method))
+        else:
+            if self.var.get():
+                self._show_results(konstants.mod_msg)
+            for t in tif + other:
+                method = t[1]['app_method']
+                self._show_results(
+                        template.format(
+                            t[0],
+                            tbl_num(method, county),
+                            t[1]['app_block_size'],
+                            t[1]['product_app_rate'] * t[1]['percent_active']\
+                                / 100,
+                            method))
 
     def hide(self):
         self.root.withdraw()
@@ -388,7 +403,7 @@ class Details(tk.Toplevel):
 #==============================================================================
 root = tk.Tk()
 root.title('Appendix K')
-root.geometry("800x400")
+root.geometry("500x400")
 center_top_level(root)
 
 #==============================================================================
