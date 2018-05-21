@@ -10,15 +10,14 @@ Date: 4/9/18
 import argparse
 import os
 import functools
-import pandas as pd
-import numpy as np
 import collections
 import sys
 import math
 import konstants
+import csv
 
 
-def parse_arguments(methods, choices, to_parse=None):
+def parse_arguments(to_parse=None):
     description =\
     '''
     Calculate buffer zone as part of recommended permit conditions for
@@ -61,7 +60,7 @@ def parse_arguments(methods, choices, to_parse=None):
     given as a number between 0 and 100 without a percentage sign.
 
     APP_METHOD: Application method, chosen from the list below:
-        ''' + '\n\t'.join('"{0}"'.format(w) for w in methods)
+        ''' + '\n\t'.join('"{}"'.format(w) for w in konstants.app_methods)
 
     parser = argparse.ArgumentParser(
                 description=description,
@@ -74,6 +73,7 @@ def parse_arguments(methods, choices, to_parse=None):
     #    help=('This flag is required for any combined application of '
     #          'chloropicrin and methyl bromide.'))
 
+    choices = konstants.inland + konstants.coastal
     rqrdNamed = parser.add_argument_group('required named arguments')
     rqrdNamed.add_argument('--county', choices=choices, required=True,
                            metavar='COUNTY', help=county_msg)
@@ -91,52 +91,56 @@ def parse_arguments(methods, choices, to_parse=None):
 def read_tables(valid_methods):
     '''Read data tables and construct lookup for tables
     (see Appendix K, K-6)'''
-
-    def read_tabular(dir, csv):
-        df = pd.read_csv(
-                os.path.join(dir, csv),
-                index_col=0,
-                na_values='NA ')
-        df.dropna(inplace=True, how='all')
-        # Leaving values as float since calculations may produce float results
-        df.index = df.index.astype(int)
-        df.columns = df.columns.astype(int)
-        
-        return df
-    try:
-        base_path = sys._MEIPASS
-    except:
-        base_path = os.path.abspath('.')
+    
+    def read_tabular(dir, filename):
+        values = []
+        row_index = []
+        with open(os.path.join(dir, filename), newline='') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',')
+            col_index = [int(i) for i in next(csvreader)[1:]]
+            for row in csvreader:
+                if all(row):  # Omit empty rows at bottom of csv files
+                    row_index.append(int(row.pop(0)))
+                    row = [  # Replace "missing" values with NaN
+                        float('NaN') if cell=='NA ' else float(cell)
+                        for cell in row]
+                    values.append(row)
+        return values, row_index, col_index
+    
+#    try:
+#        base_path = sys._MEIPASS
+#    except:
+#        base_path = os.getcwd()
+    base_path = os.getcwd()
     tables_dir = os.path.join(base_path, 'Tables', '112017')
     read_tabular = functools.partial(read_tabular, tables_dir)
     coastal_tbls = [read_tabular(csv) for csv in konstants.coastal_csv]
     inland_tbls = [read_tabular(csv) for csv in konstants.inland_csv]
-
     lookup_tbl = collections.defaultdict(dict)
     for i, v in enumerate(valid_methods):
         lookup_tbl[v]['coastal'] = coastal_tbls[i]
         lookup_tbl[v]['inland'] = inland_tbls[i]
-
     return lookup_tbl
 
 
-def check_acreage(apps, limit, string, assist):
+def check_acreage(apps, limit, string):
     acreage = sum(a['app_block_size'] for a in apps)
     if acreage > limit:
         print('Combined {} acreage cannot exceed {} acres. '
-              .format(string, limit) + assist)
+              .format(string, limit) + konstants.assistance)
         sys.exit()
-
-# For overlapping non-TIF or untarped applications, each application block
-# has the same buffer zone. It is found by using the highest application
-# rate and total acreage of these blocks to look up values in the tables
-# for each specified method, then selecting the highest value. For non-
-# overlapping blocks, calculate each buffer zone based on the details of the
-# individual applications--just as for the TIF applications (overlapping or
-# otherwise--only the total acreage limitation matters for TIF applications).
 
 
 def recalculate(apps, cb_list):
+    '''
+    For overlapping non-TIF or untarped applications, each application block
+    has the same buffer zone. It is found by using the highest application
+    rate and total acreage of these blocks to look up values in the tables
+    for each specified method, then selecting the highest value. For non-
+    overlapping blocks, calculate each buffer zone based on the details of the
+    individual applications--just as for the TIF applications (overlapping or
+    otherwise--only the total acreage limitation matters for TIF applications).
+    '''
     acreage = sum(a['app_block_size'] for a in apps)
     rates = [a['percent_active'] * a['product_app_rate'] / 100
              for a in apps]
@@ -150,11 +154,36 @@ def recalculate(apps, cb_list):
     return [buffers[idx2]], [apps[idx2]]
 
 
-def calculate_buffer(app, county_type, lookup, methods, assist):
-    if app['app_method'] == methods[0]:
-        print('TIF strip shallow injection is prohibited. ' + assist)
+def calculate_buffer(app, county_type, lookup):
+    def closest_idx(param, indices, strings):
+        '''
+        Look up value in table, "round up to the nearest rate and block size,
+        where applicable" (--Table caption), and verify that app rate and 
+        app block size are within the ranges allowed in the table
+        '''
+        error_msg = (
+            '{} ({} {}) exceeds maximum allowable {} ({} {}). '
+            ) + konstants.assistance
+                
+        diffs = [diff for diff in map(lambda x: param - x, indices)]
+        try:
+            closest_diff = max(diff for diff in diffs if diff<=0)
+        except ValueError:
+            print(error_msg.format(
+                    strings[0],
+                    param,
+                    strings[1],
+                    strings[2],
+                    indices[-1],
+                    strings[1]))
+            sys.exit()
+        return diffs.index(closest_diff)        
+    
+    if app['app_method'] == konstants.app_methods[0]:
+        print('TIF strip shallow injection is prohibited. ' + 
+              konstants.assistance)
         sys.exit()
-
+        
 # Legacy from early work on integrating methyl bromide calculations
 #    if app['app_method'] == methods[-1] and apps.mebr:
 #        print('Untarped drip fumigations are prohibited for chloropicrin '
@@ -162,122 +191,103 @@ def calculate_buffer(app, county_type, lookup, methods, assist):
 #        sys.exit()
 
     # Lookup correct table for combination of application method and county
-    tbl = lookup[app['app_method']][county_type]
-
-    # Table captions: "Round up to the nearest rate and block size, where
-    # applicable."
+    vals, rates, acreage = lookup[app['app_method']][county_type]
     app_rate = app['product_app_rate'] * app['percent_active'] / 100
-    closest_rate = np.abs(app_rate - tbl.index.to_series()).idxmin()
-    closest_idx_rate = np.where(tbl.index == closest_rate)[0][0]
-    closest_size = (np.abs(app['app_block_size'] - tbl.columns.to_series())
-                    .idxmin())
-    closest_idx_size = np.where(tbl.columns == closest_size)[0][0]
-
-    if closest_rate < app_rate:
-        closest_idx_rate += 1
-
-    if closest_size < app['app_block_size']:
-        closest_idx_size += 1
-
-    # Lookup value in table and verify that application rate and block size
-    # are within the ranges given by table's index and column headers
-    error_msg = (
-        '{} ({} {}) exceeds maximum allowable {} ({} {}). ') + assist
-
-    try:
-        col = tbl.loc[tbl.index[closest_idx_rate]]
-    except IndexError as e:
-        print(error_msg.format(
-                'Application rate',
-                app_rate,
-                'lbs AI/acre',
-                'rate',
-                closest_rate,
-                'lbs AI/acre'))
+    rate_strings = ['Application rate', 'lbs AI/acre', 'rate']
+    closest_idx_rate = closest_idx(app_rate, rates, rate_strings)
+    acre_strings = ['Application block size', 'acres', 'block size']
+    closest_idx_acre = closest_idx(app['app_block_size'], acreage, 
+                                   acre_strings)
+    result = vals[closest_idx_rate][closest_idx_acre]
+    if math.isnan(result):  # Verify that value is not NA
+        print('Value unavailable for inputs. ' + konstants.assistance)
         sys.exit()
-
-    try:
-        result = col[tbl.columns[closest_idx_size]]
-    except IndexError as e:
-        print(error_msg.format(
-                'Application block size',
-                app['app_block_size'],
-                'acres',
-                'block size',
-                str(tbl.columns[-1]),
-                'acres'))
-        sys.exit()
-
-    # Verify that value is not NA and if so, return results
-    if math.isnan(result):
-        print('Value unavailable for inputs. ' + assist)
-        sys.exit()
-    else:
+    else:  # If not NA, return results
         return result
 
-
-def print_results(k, string, apps, buffers):
-    for i, app in enumerate(apps):
-        units = ['acres', 'lbs/acre', '%', '']
-        unit_dict = dict(zip(k, units))
-        print(string)
-        print('\t' + '\n\t'
-              .join('{}: {} {}'.format(k, str(v), unit_dict[k])
-                    for k, v in app.items()))
-        print('Application buffer-zone distance: {} feet\n'
-              .format(buffers[i]))
+def validate(args):
+    '''
+    Data processing and validation. (Note that application details can not be
+    properly validated via add_argument's type argument, b/c the validation
+    function assigned to type is applied to one element at a time, so it is
+    difficult to distinguish an invalid application method from an invalid
+    value for a numeric argument.)'''
+    applications = []
+    for i, values in enumerate(args.app_details):
+        try:
+            values[:-1] = [float(v) for v in values[0:3]]
+        except ValueError:
+            msg = ('One or more application details should have been numeric '
+                   'but its value was not numeric. Please ensure that '
+                   'the first three inputs for Application {} are valid '
+                   'numbers.').format(i+1)
+            raise argparse.ArgumentTypeError(msg)
+        if values[2]<0 or values[2]>100:
+            print('The percentage of the product that is chloropicrin must be '
+                  'entered as a number between 0 and 100. Please enter a '
+                  'valid percentage for Application {}.'.format(i+1))
+            sys.exit()
+        if values[-1] not in konstants.app_methods:
+            msg = ('Please input a valid application method for Application '
+                   '{}').format(i+1)
+            raise argparse.ArgumentTypeError(msg)
+        applications.append(dict(zip(konstants.keys, values)))
+    return applications
 
 
 def main(args):
-
-    lookup_table = read_tables(konstants.app_methods[1:])
-
-    # Convert parsed options to list of application dicts
-    applications = []
-    for values in args.app_details:
-        values[0:3] = [float(v) for v in values[0:3]]
-        applications.append(dict(zip(konstants.keys, values)))
-
-    # Separate applications into lists of tif and untarped/non-tif
+    '''Main routine'''
+    # Validate applications and separate into lists of tif and untarped/non-tif
+    applications = validate(args)
     tif = konstants.app_methods[1:5]
     tif_apps = [a for a in applications if a['app_method'] in tif]
     other_apps = [a for a in applications if a['app_method'] not in tif]
-
-    # Lookup the appropriate table for the county
-    if args.county in konstants.coastal:
-        cty_type = 'coastal'
-    if args.county in konstants.inland:
-        cty_type = 'inland'
+    tif_apps_nums = [i+1 for i,a in enumerate(applications) 
+        if a['app_method'] in tif]
+    other_apps_nums = [i+1 for i,a in enumerate(applications) 
+        if a['app_method'] not in tif]
 
     # Check acreage, (re)calculate buffers, and print results
-    args_cb = [cty_type, lookup_table, konstants.app_methods,
-               konstants.assistance]
+    lookup_table = read_tables(konstants.app_methods[1:])
+    cty_type = 'coastal' if args.county in konstants.coastal else 'inland'
+    args_cb = [cty_type, lookup_table]
     if tif_apps:
-        check_acreage(tif_apps, 60, 'TIF', konstants.assistance)
+        check_acreage(tif_apps, 60, 'TIF')
         tif_buffers = [calculate_buffer(app, *args_cb) for app in tif_apps]
     else:
         tif_buffers = []
     if other_apps:
-        check_acreage(other_apps, 40, 'non-TIF or untarped',
-                      konstants.assistance)
+        check_acreage(other_apps, 40, 'non-TIF or untarped')
         other_buffers = [calculate_buffer(app, *args_cb) for app in other_apps]
         if args.recalc:
             other_buffers, other_apps = recalculate(other_apps, args_cb)
     else:
         other_buffers = []
 
-    return list(zip(tif_buffers, tif_apps)), list(zip(other_buffers, other_apps))
+    return list(zip(tif_buffers, tif_apps)), list(
+        zip(other_buffers, other_apps)), tif_apps_nums, other_apps_nums
+
+
+#def print_results(k, string, apps, buffers):
+#    for i, app in enumerate(apps):
+#        units = ['acres', 'lbs/acre', '%', '']
+#        unit_dict = dict(zip(k, units))
+#        print(string)
+#        print('\t' + '\n\t'
+#              .join('{}: {} {}'.format(k, str(v), unit_dict[k])
+#                    for k, v in app.items()))
+#        print('Application buffer-zone distance: {} feet\n'
+#              .format(buffers[i]))
 
 # The code below won't run on it's own because of last minute moving around of
 # code snippets for printing that were in main. Not super important, and
 # any print formatting should be done with the textwrap module/package in the
 # future.
-# if __name__ == "__main__":
-#     args = parse_arguments(konstants.app_methods,
-#                            konstants.inland + konstants.coastal)
-#     tif, other = main(args)
-#     print(tif)
-#     print(other)
+#if __name__ == "__main__":
+#    args = parse_arguments()
+#    tif, other = main(args)
+#    print(tif)
+#    print(other)
 #     # display_results = functools.partial(print_results, konstants.keys)
 #     # display_results('TIF application inputs:', tif_apps, tif_buffers)
 #     # display_results('Non-TIF and untarped application inputs:',

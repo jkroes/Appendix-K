@@ -15,7 +15,7 @@ python appendix_k.py --county "san bernadi" --app-details 0 0 0 "non-tif strip i
 
 # Throw error if returned value is NA in original csv (nan in loaded table)
 # (Valid run illustrates rounding behavior)
-python appendix_k.py --county kern --app-details 35 1300 20 "untarped bed injection"
+python appendix_k.py --county kern --app-details 36 1300 20 "untarped bed injection"
 python appendix_k.py --county kern --app-details 35 1301 20 "untarped bed injection"
 
 # Throw error about application rate
