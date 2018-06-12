@@ -225,15 +225,13 @@ def validate(args):
 
 def main(args):
     '''Main routine'''
+    def split_apps(checklist):
+        x = list(zip(*[(a,i+1) for i,a in enumerate(applications)
+            if a['app_method'] in checklist]))
+        return x if x else [[], []]
+
     # Validate applications and separate into lists of tif and untarped/non-tif
     applications = validate(args)
-    tif = konstants.app_methods[1:5]
-    tif_apps = [a for a in applications if a['app_method'] in tif]
-    other_apps = [a for a in applications if a['app_method'] not in tif]
-    tif_apps_nums = [i+1 for i,a in enumerate(applications) 
-        if a['app_method'] in tif]
-    other_apps_nums = [i+1 for i,a in enumerate(applications) 
-        if a['app_method'] not in tif]
 
     # Check for prohibited applications
     for app in applications:
@@ -241,6 +239,11 @@ def main(args):
             print('TIF strip shallow injection is prohibited. ' + 
                 konstants.assistance)
             sys.exit()
+
+    tif_methods = konstants.app_methods[1:5]
+    antitif_methods = konstants.app_methods[5:]
+    tif_apps, tif_apps_nums = split_apps(tif_methods)
+    other_apps, other_apps_nums = split_apps(antitif_methods)
 
     # Check acreage, (re)calculate buffers, and print results
     lookup_table = read_tables(konstants.app_methods[1:])
