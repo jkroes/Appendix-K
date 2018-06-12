@@ -177,12 +177,6 @@ def calculate_buffer(app, county_type, lookup):
                     strings[1]))
             sys.exit()
         return diffs.index(closest_diff)        
-    
-    if app['app_method'] == konstants.app_methods[0]:
-        print('TIF strip shallow injection is prohibited. ' + 
-              konstants.assistance)
-        sys.exit()
-        
 
     # Lookup correct table for combination of application method and county
     vals, rates, acreage = lookup[app['app_method']][county_type]
