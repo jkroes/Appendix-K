@@ -49,8 +49,16 @@ inland_csv = [
 keys = [
     'app_block_size', 'product_app_rate', 'percent_active', 'app_method']
 
-assistance = ('Please contact the California Department of Pesticide '
+assistance = ('Contact the California Department of Pesticide '
               'Regulation for assistance.')
+
+assistance2 = assistance.split()[0].lower() + ' ' + ' '.join(
+    assistance.split()[1:])
+
+assistance = (
+    'Please check that your inputs are correct. If the inputs are valid and '
+    'the problem persists, then please '    
+) + assistance2
 
 mod_msg = ('NOTE: Displayed "inputs" may differ from user inputs for '
            'overlapping non-TIF or untarped application blocks. A single '
@@ -65,9 +73,6 @@ overlap_msg = ('Buffer zones may need to be recalculated if buffer zones for '
                'earlier applications are complete until the start of later '
                'applications. These adjusted buffer zones can be calculated by '
                'checking this box.')
-
-assistance2 = assistance.split()[0].lower() + ' ' + ' '.join(
-    assistance.split()[1:])
 
 app_msg = (
     'Calculate buffer zone as part of recommended permit conditions for '
