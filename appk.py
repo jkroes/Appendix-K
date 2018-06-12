@@ -183,11 +183,6 @@ def calculate_buffer(app, county_type, lookup):
               konstants.assistance)
         sys.exit()
         
-# Legacy from early work on integrating methyl bromide calculations
-#    if app['app_method'] == methods[-1] and apps.mebr:
-#        print('Untarped drip fumigations are prohibited for chloropicrin '
-#              'fumigations in combination with methyl bromide. ' + assist)
-#        sys.exit()
 
     # Lookup correct table for combination of application method and county
     vals, rates, acreage = lookup[app['app_method']][county_type]
@@ -245,6 +240,13 @@ def main(args):
         if a['app_method'] in tif]
     other_apps_nums = [i+1 for i,a in enumerate(applications) 
         if a['app_method'] not in tif]
+
+    # Check for prohibited applications
+    for app in applications:
+        if app['app_method'] == konstants.app_methods[0]:
+            print('TIF strip shallow injection is prohibited. ' + 
+                konstants.assistance)
+            sys.exit()
 
     # Check acreage, (re)calculate buffers, and print results
     lookup_table = read_tables(konstants.app_methods[1:])
