@@ -4,10 +4,10 @@ block_cipher = None
 
 
 a = Analysis(['guik.py'],
-             pathex=['C:\\Users\\jkroes\\Desktop\\appk'],
+             pathex=['C:\\Users\\jkroes\\Desktop\\MyProjects\\appk'],
              binaries=[],
              datas=[('help.gif', '.'), ('Tables\\112017', 'Tables\\112017')],
-             hiddenimports=['pandas._libs.tslibs.timedeltas'],
+             hiddenimports=[],
              hookspath=[],
              runtime_hooks=[],
              excludes=[],
