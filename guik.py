@@ -341,7 +341,9 @@ class MainFrame(ttk.Frame):
         template = ('Application {}:\n'
                     'Buffer zone distance: {} feet\n'
                     '(Calculated using {}.)\n\n')
-        results += prefix            
+        results += prefix
+        if not apps:
+            results += 'Not Applicable\n\n'
         for i,app in enumerate(apps):
             method = app[1]['app_method']
             result = app[0]
@@ -432,7 +434,7 @@ class Details(tk.Toplevel):
                 photo=self.mainframe.photo)
 
         # Create and position window navigation button
-        ttk.Button(self, text='Return to main screen', command=self._close
+        ttk.Button(self, text='Save and Return to main screen', command=self._close
                    ).grid(row=4, column=1, pady=20)
 
     def show(self):
