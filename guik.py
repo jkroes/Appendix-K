@@ -144,11 +144,10 @@ class MainFrame(ttk.Frame):
         # self.overlap.invoke()  # Toggles state of Checkbutton
 
         # Create, position, and bind help labels:
-#        try:  # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
-#            base_path = sys._MEIPASS
-#        except:
-#            base_path = os.getcwd()
-        base_path = os.getcwd()
+        try:  # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
+            base_path = sys._MEIPASS
+        except:
+            base_path = os.getcwd()
         photo_path = os.path.join(base_path, 'help.gif')
         self.photo = tk.PhotoImage(file=photo_path).subsample(30,30)
         msgs = [konstants.county_msg, konstants.overlap_msg]

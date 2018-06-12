@@ -107,11 +107,10 @@ def read_tables(valid_methods):
                     values.append(row)
         return values, row_index, col_index
     
-#    try:
-#        base_path = sys._MEIPASS
-#    except:
-#        base_path = os.getcwd()
-    base_path = os.getcwd()
+    try:
+        base_path = sys._MEIPASS
+    except:
+        base_path = os.getcwd()
     tables_dir = os.path.join(base_path, 'Tables', '112017')
     read_tabular = functools.partial(read_tabular, tables_dir)
     coastal_tbls = [read_tabular(csv) for csv in konstants.coastal_csv]
