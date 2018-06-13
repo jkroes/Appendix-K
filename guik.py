@@ -242,45 +242,30 @@ class MainFrame(ttk.Frame):
             self.details[idx].show()
 
     def _run(self):
-        '''Run command line script with GUI inputs'''
-        overlap = self.var.get()
-        county = self.county.get()
-        self._main(overlap, county)
-
-    # NOTE: Needs to be associated with an element to run        
-    def _run_from_file(self, file):
-        '''Run command line script with inputs from file'''
-        data = json.load(file)
-        app_args = [['--app-details'] + [
-                [d['app_block_size'], d['app_rate'], d['percent_active'], 
-                d['app_method']]] for d in data['applications']]
-        self._main(data['county'], data['overlap'], app_args)
-
-    def _main(self, overlap, county, app_args=None):
         '''Run command line script (appk.py) for buffer zone calculation
 
         NOTE: tkinter.Entry.get is the method used by all widgets
         NOTE: argparse.ArgumentParser.parse_args requires a flat list
         '''
-        county = self._verify_county(county)
-        app_args = self._verify_all_details(app_args)
-        if not self._verify_details() or not app_args or not county:
-            return        
-        args = ['--county', county] + [elem for li in app_args for elem in li]
-        args = ['--recalc'] + args if self.var.get() else args
-        parsed_args = appk.parse_arguments(args)        
+        recalc = True if self.var.get() else False
+        county = self._verify_county()
+        app_details = self._verify_all_details()
+        if not self._verify_details() or not app_details or not county:
+            return 
         
         # Pass args to appk.py and collect results
         with contextlib.suppress(SystemExit), Capturing() as out:
-            tif, other, tif_nums, other_nums = appk.main(parsed_args)
-        # Display error messages
+            tif, other, tif_nums, other_nums =\
+                appk.main(recalc, county, app_details)
+
+        # Display "error" messages
         out = ''.join(out)
         if out:  # Display error messages from appk.py
             self._prompt(out)
             return
 
         # Display results
-        if overlap and other:  
+        if recalc and other:  
             if settings.show_mod_msg:
                 self._show_results(konstants.mod_msg)
             other_nums = [', '.join(str(o) for o in other_nums)]
@@ -294,8 +279,9 @@ class MainFrame(ttk.Frame):
     def _prompt(warning):
         messagebox.showwarning('Warning', warning)
         
-    def _verify_county(self, county):
+    def _verify_county(self):
         '''Verify that the county has been entered (fully)'''
+        county = self.county.get()
         if not county or county not in self.counties:
             warning = ('Please specify the county in which the '
                        'application(s) will take place. Ensure that the '
@@ -305,11 +291,7 @@ class MainFrame(ttk.Frame):
             return False
         return county
     
-    def _verify_all_details(self, app_args=None):
-        if not app_args:
-            app_args = [['--app-details'] + [tk.Entry.get(i) for i in [
-                d.app_block_size, d.app_rate, d.percent_active, d.app_method]
-                ] for d in self.details]
+    def _verify_all_details(self):
         '''Verify that each application with a details window has all 
         details and prepare inputs for appk.py'''
         warning = ('Some applications are missing necessary '
@@ -318,14 +300,21 @@ class MainFrame(ttk.Frame):
         warning2 = ('Ensure that the application method for each '
                    'application is fully typed out or else is '
                    'selected from the dropdown.')
+        app_args = [[tk.Entry.get(i) for i in d.app_details]
+            for d in self.details]     
         for app_arg in app_args:
             if not all(app_arg):
                 self._prompt(warning)
                 return False
             if app_arg[-1] not in konstants.app_methods:
                 self._prompt(warning2)
-                return False       
-        return app_args
+                return False
+        # Convert numeric-string inputs to floating point numbers
+        for app in app_args:
+            app[:-1] = [float(arg) for arg in app[:-1]]
+        applications = [dict(zip(konstants.keys, values)) 
+            for values in app_args]          
+        return applications
         
     def _verify_details(self):
         '''Verify each application is associated with a details window'''
@@ -407,24 +396,23 @@ class Details(tk.Toplevel):
 
         # Create entry widgets
         vcmd = (self.register(validate_entry), '%P')
-        self.entries = [ttk.Entry(self, validate='key', validatecommand=vcmd)
-                        for _ in range(3)]
-        self.app_block_size, self.app_rate, self.percent_active = self.entries
+        entries = [ttk.Entry(self, validate='key', validatecommand=vcmd)
+                        for _ in range(3)]        
 
         # Create combobox widget
         validate_app_method = functools.partial(validate, 
                                                 konstants.app_methods)
         vcmd_meth = (self.register(validate_app_method), '%P')
-        self.app_method = ttk.Combobox(self,
-                                       width=40,
-                                       values=konstants.app_methods,
-                                       validate='key',
-                                       validatecommand=vcmd_meth)
+        app_method = ttk.Combobox(self,
+                                  width=40,
+                                  values=konstants.app_methods,
+                                  validate='key',
+                                  validatecommand=vcmd_meth)
 
         # Position entry and combobox widgets
-        for i in range(3):
-            self.entries[i].grid(row=i, column=1, sticky='WE')
-        self.app_method.grid(row=3, column=1, sticky='WE')
+        self.app_details = entries + [app_method]
+        for i in range(len(self.app_details)):
+            self.app_details[i].grid(row=i, column=1, sticky='WE')
 
         # Create and position help labels
         msgs = [konstants.block_size_msg, konstants.rate_msg,
@@ -446,9 +434,8 @@ class Details(tk.Toplevel):
         '''Update mainframe labels with input details and hide window'''
         idx = self.app_number - 1
         button = self.mainframe.applications[idx]
-        attrs = self.entries + [self.app_method]
         for i, d in enumerate(button.details):
-            d.configure(text=attrs[i].get()) 
+            d.configure(text=self.app_details[i].get()) 
 
         self.withdraw()
 

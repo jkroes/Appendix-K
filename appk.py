@@ -17,77 +17,6 @@ import konstants
 import csv
 
 
-def parse_arguments(to_parse=None):
-    description =\
-    '''
-    Calculate buffer zone as part of recommended permit conditions for
-    chlorpicrin and chlorpicrin/1,3-D products, as outlined in Pesticide Use
-    Enforcement Program Standards Compendium Volume 3, Restricted Materials and
-    Permitting, Appendix K.'''
-
-    recalc_msg =\
-    '''
-    Buffer zones may need to be recalculated if buffer zones for two
-    or more applications overlap within 36 hours from the time earlier
-    applications are complete until the start of later applications. These
-    adjusted buffer zones can be calculated by running this script with this
-    option enabled and by re-entering application details for only those
-    applications with overlapping buffers. Buffer zones for applications that
-    do not overlap do not need to be recalculated, and details for those
-    applications should not be re-entered when calling this script with this
-    option enabled.
-    '''
-
-    county_msg =\
-    '''
-    County in which the application takes place, in lowercase letters and
-    surrounded by quotes.'''
-
-    app_msg =\
-    '''
-    Application details. For each application, use this flag with the four
-    arguments below:
-
-    APP_BLOCK_SIZE: Size of the application block, given in acres.
-    Application block size is limited to 60 acres for applications using
-    totally impermeable films (TIF) and 40 acres for non-TIF and untarped
-    applications.
-
-    PRODUCT_APP_RATE: Broadcast-equivalent application rate for the
-    product, given in pounds per acre.
-
-    PERCENT_ACTIVE: Percent of chlorpicrin listed on the product label,
-    given as a number between 0 and 100 without a percentage sign.
-
-    APP_METHOD: Application method, chosen from the list below:
-        ''' + '\n\t'.join('"{}"'.format(w) for w in konstants.app_methods)
-
-    parser = argparse.ArgumentParser(
-                description=description,
-                formatter_class=argparse.RawTextHelpFormatter)
-
-    parser.add_argument('--recalc', action='store_true', help=recalc_msg)
-    #parser.add_argument(
-    #    '--mebr',  # dest='mebr' seems to make this a required argument ...
-    #    action='store_true',  # ... even with action='store_true'
-    #    help=('This flag is required for any combined application of '
-    #          'chloropicrin and methyl bromide.'))
-
-    choices = konstants.inland + konstants.coastal
-    rqrdNamed = parser.add_argument_group('required named arguments')
-    rqrdNamed.add_argument('--county', choices=choices, required=True,
-                           metavar='COUNTY', help=county_msg)
-    rqrdNamed.add_argument('--app-details', nargs=4, action='append',
-                           required=True,
-                           metavar=('APP_BLOCK_SIZE',
-                                    'PRODUCT_APP_RATE',
-                                    'PERCENT_ACTIVE',
-                                    'APP_METHOD'),
-                           help=app_msg)
-
-    return parser.parse_args(to_parse) if to_parse else parser.parse_args()
-
-
 def read_tables(valid_methods):
     '''Read data tables and construct lookup for tables
     (see Appendix K, K-6)'''
@@ -193,45 +122,13 @@ def calculate_buffer(app, county_type, lookup):
     else:  # If not NA, return results
         return result
 
-def validate(args):
-    '''
-    Data processing and validation. (Note that application details can not be
-    properly validated via add_argument's type argument, b/c the validation
-    function assigned to type is applied to one element at a time, so it is
-    difficult to distinguish an invalid application method from an invalid
-    value for a numeric argument.)'''
-    applications = []
-    for i, values in enumerate(args.app_details):
-        try:
-            values[:-1] = [float(v) for v in values[0:3]]
-        except ValueError:
-            msg = ('One or more application details should have been numeric '
-                   'but its value was not numeric. Please ensure that '
-                   'the first three inputs for Application {} are valid '
-                   'numbers.').format(i+1)
-            raise argparse.ArgumentTypeError(msg)
-        if values[2]<0 or values[2]>100:
-            print('The percentage of the product that is chloropicrin must be '
-                  'entered as a number between 0 and 100. Please enter a '
-                  'valid percentage for Application {}.'.format(i+1))
-            sys.exit()
-        if values[-1] not in konstants.app_methods:
-            msg = ('Please input a valid application method for Application '
-                   '{}').format(i+1)
-            raise argparse.ArgumentTypeError(msg)
-        applications.append(dict(zip(konstants.keys, values)))
-    return applications
 
-
-def main(args):
+def main(recalc, county, applications):
     '''Main routine'''
     def split_apps(checklist):
         x = list(zip(*[(a,i+1) for i,a in enumerate(applications)
             if a['app_method'] in checklist]))
         return x if x else [[], []]
-
-    # Validate applications and separate into lists of tif and untarped/non-tif
-    applications = validate(args)
 
     # Check for prohibited applications
     for app in applications:
@@ -240,6 +137,7 @@ def main(args):
                 konstants.assistance)
             sys.exit()
 
+    # Split applications into lists of tif and untarped/non-tif
     tif_methods = konstants.app_methods[1:5]
     antitif_methods = konstants.app_methods[5:]
     tif_apps, tif_apps_nums = split_apps(tif_methods)
@@ -247,7 +145,7 @@ def main(args):
 
     # Check acreage, (re)calculate buffers, and print results
     lookup_table = read_tables(konstants.app_methods[1:])
-    cty_type = 'coastal' if args.county in konstants.coastal else 'inland'
+    cty_type = 'coastal' if county in konstants.coastal else 'inland'
     args_cb = [cty_type, lookup_table]
     if tif_apps:
         check_acreage(tif_apps, 60, 'TIF')
@@ -257,43 +155,13 @@ def main(args):
     if other_apps:
         check_acreage(other_apps, 40, 'non-TIF or untarped')
         other_buffers = [calculate_buffer(app, *args_cb) for app in other_apps]
-        if args.recalc:
+        if recalc:
             other_buffers, other_apps = recalculate(other_apps, args_cb)
     else:
         other_buffers = []
 
     return list(zip(tif_buffers, tif_apps)), list(
         zip(other_buffers, other_apps)), tif_apps_nums, other_apps_nums
-
-
-#def print_results(k, string, apps, buffers):
-#    for i, app in enumerate(apps):
-#        units = ['acres', 'lbs/acre', '%', '']
-#        unit_dict = dict(zip(k, units))
-#        print(string)
-#        print('\t' + '\n\t'
-#              .join('{}: {} {}'.format(k, str(v), unit_dict[k])
-#                    for k, v in app.items()))
-#        print('Application buffer-zone distance: {} feet\n'
-#              .format(buffers[i]))
-
-# The code below won't run on it's own because of last minute moving around of
-# code snippets for printing that were in main. Not super important, and
-# any print formatting should be done with the textwrap module/package in the
-# future.
-#if __name__ == "__main__":
-#    args = parse_arguments()
-#    tif, other = main(args)
-#    print(tif)
-#    print(other)
-#     # display_results = functools.partial(print_results, konstants.keys)
-#     # display_results('TIF application inputs:', tif_apps, tif_buffers)
-#     # display_results('Non-TIF and untarped application inputs:',
-#     #                 other_apps, other_buffers)
-#     # if args.recalc:
-#     #     print(konstants.mod_msg)
-#     # else:
-#     #     print(konstants.overlap_msg)
 
 ##### More info on... #####
 # Defaultdicts:
