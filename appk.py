@@ -117,7 +117,9 @@ def calculate_buffer(app, county_type, lookup):
                                    acre_strings)
     result = vals[closest_idx_rate][closest_idx_acre]
     if math.isnan(result):  # Verify that value is not NA
-        print('Value unavailable for inputs. ' + konstants.assistance)
+        print(
+            'Based on the inputs, one or more buffer zones would exceed the '
+            'maximum size of half a mile. ' + konstants.assistance)
         sys.exit()
     else:  # If not NA, return results
         return result
