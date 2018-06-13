@@ -154,6 +154,11 @@ class MainFrame(ttk.Frame):
         for i in range(0, 2):
             make_help_label(self, row=i, msg=msgs[i], photo=self.photo)
 
+        # Prepare photo for later creation of a label
+        # photo_path2 = os.path.join(base_path, 'dpr_logo.gif')
+        photo_path2 = os.path.join(base_path, 'dprlogo_3.gif')
+        self.logophoto = tk.PhotoImage(file=photo_path2).subsample(4,4)
+
         # Create movable action buttons (don't position yet)
         self.adder = ttk.Button(self, text='+', command=self.add_button)
         self.remover = ttk.Button(self, text='-', command=self.rm_button)
@@ -188,6 +193,7 @@ class MainFrame(ttk.Frame):
             self, text=text, command=lambda idx=idx: self._add_details(idx))
         self.applications.append(button)
         
+        # Prepare to display inputs on main screen under each button
         button.details_labels = [ttk.Label(self, text=t) for t in self.texts]
         button.details = [ttk.Label(self, text='') for t in self.texts]
 
@@ -228,8 +234,11 @@ class MainFrame(ttk.Frame):
         if not hasattr(self, 'submitter_help'):  # The only help button that
             self.submitter_help = make_help_label(  # moves around
                 self, row=offset, msg=konstants.app_msg, photo=self.photo)
-        else:
-            self.submitter_help.grid(row=offset, column=3, sticky='W')
+        self.submitter_help.grid(row=offset, column=3, sticky='W')
+        # DPR Logo
+        if not hasattr(self, 'logo'):
+            self.logo = ttk.Label(self, image=self.logophoto)
+        self.logo.grid(row=offset+1, column=1, columnspan=2, sticky='EW')
 
     def _add_details(self, idx):
         '''Open window to input application-specific parameters'''
@@ -313,7 +322,7 @@ class MainFrame(ttk.Frame):
         for app in app_args:
             app[:-1] = [float(arg) for arg in app[:-1]]
         applications = [dict(zip(konstants.keys, values)) 
-            for values in app_args]          
+            for values in app_args]
         return applications
         
     def _verify_details(self):
