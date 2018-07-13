@@ -7,7 +7,6 @@ Unit: Air Program
 Date: 4/9/18
 """
 
-import argparse
 import os
 import functools
 import collections
@@ -15,12 +14,13 @@ import sys
 import math
 import konstants
 import csv
+import copy
 
 
 def read_tables(valid_methods):
     '''Read data tables and construct lookup for tables
     (see Appendix K, K-6)'''
-    
+
     def read_tabular(dir, filename):
         values = []
         row_index = []
@@ -35,7 +35,7 @@ def read_tables(valid_methods):
                         for cell in row]
                     values.append(row)
         return values, row_index, col_index
-    
+
     try:
         base_path = sys._MEIPASS
     except:
@@ -48,15 +48,8 @@ def read_tables(valid_methods):
     for i, v in enumerate(valid_methods):
         lookup_tbl[v]['coastal'] = coastal_tbls[i]
         lookup_tbl[v]['inland'] = inland_tbls[i]
+
     return lookup_tbl
-
-
-def check_acreage(apps, limit, string):
-    acreage = sum(a['app_block_size'] for a in apps)
-    if acreage > limit:
-        print('Combined {} acreage cannot exceed {} acres. '
-              .format(string, limit) + konstants.assistance)
-        sys.exit()
 
 
 def recalculate(apps, cb_list):
@@ -69,101 +62,128 @@ def recalculate(apps, cb_list):
     individual applications--just as for the TIF applications (overlapping or
     otherwise--only the total acreage limitation matters for TIF applications).
     '''
-    acreage = sum(a['app_block_size'] for a in apps)
-    rates = [a['percent_active'] * a['product_app_rate'] / 100
-             for a in apps]
-    idx = rates.index(max(rates))
-    for app in apps:
-        app['app_block_size'] = acreage
-        app['percent_active'] = apps[idx]['percent_active']
-        app['product_app_rate'] = apps[idx]['product_app_rate']
-    buffers = [calculate_buffer(app, *cb_list) for app in apps]
-    idx2 = buffers.index(max(buffers))
-    return [buffers[idx2]], [apps[idx2]]
+    # Calculate potential buffer zones
+    acreage = sum(a['block'] for a in apps)
+    max_broad = max(a['broadcast'] for a in apps)
+    app_copies = copy.deepcopy(apps)
+    for app in app_copies:
+        app['block'] = acreage
+        app['broadcast'] = max_broad
+    buffers = [calculate_buffer(app, *cb_list) for app in app_copies]
+    buffer = max(buffers)
+    idx = buffers.index(buffer)
+
+    # Construct a single, partial application representing all apps
+    # for display by the script that called this one
+    new = {}
+    new['number'] = ', '.join(str(a['number']) for a in apps)
+    new['name'] = ', '.join(str(a['name']) for a in apps)
+    new['block'] = acreage
+    new['broadcast'] = max_broad
+    new['method'] = apps[idx]['method']
+
+    return [new], [buffer]
 
 
 def calculate_buffer(app, county_type, lookup):
     def closest_idx(param, indices, strings):
         '''
         Look up value in table, "round up to the nearest rate and block size,
-        where applicable" (--Table caption), and verify that app rate and 
+        where applicable" (--Table caption), and verify that app rate and
         app block size are within the ranges allowed in the table
         '''
         error_msg = (
             '{} ({} {}) exceeds maximum allowable {} ({} {}). '
             ) + konstants.assistance
-                
+
         diffs = [diff for diff in map(lambda x: param - x, indices)]
         try:
             closest_diff = max(diff for diff in diffs if diff<=0)
         except ValueError:
             print(error_msg.format(
                     strings[0],
-                    param,
+                    konstants.truncate(param, 1),
                     strings[1],
                     strings[2],
                     indices[-1],
                     strings[1]))
             sys.exit()
-        return diffs.index(closest_diff)        
+
+        return diffs.index(closest_diff)
 
     # Lookup correct table for combination of application method and county
-    vals, rates, acreage = lookup[app['app_method']][county_type]
-    app_rate = app['product_app_rate'] * app['percent_active'] / 100
-    rate_strings = ['Application rate', 'lbs AI/acre', 'rate']
-    closest_idx_rate = closest_idx(app_rate, rates, rate_strings)
+    vals, rates, acreage = lookup[app['method']][county_type]
+    rate_strings = ['Broadcast equivalent application rate', 'lbs AI/acre', 'rate']
+    closest_idx_rate = closest_idx(app['broadcast'], rates, rate_strings)
     acre_strings = ['Application block size', 'acres', 'block size']
-    closest_idx_acre = closest_idx(app['app_block_size'], acreage, 
+    closest_idx_acre = closest_idx(app['block'], acreage,
                                    acre_strings)
-    result = vals[closest_idx_rate][closest_idx_acre]
-    if math.isnan(result):  # Verify that value is not NA
+    buffer = vals[closest_idx_rate][closest_idx_acre]
+    if math.isnan(buffer):  # Verify that value is not NA
         print(
             'Based on the inputs, one or more buffer zones would exceed the '
             'maximum size of half a mile. ' + konstants.assistance)
         sys.exit()
-    else:  # If not NA, return results
-        return result
+    
+    return int(buffer)
 
+
+def broadcast_equiv_calc(app):
+    '''Convert product application rate to broadcast-
+    equivalent rate, converting units if necessary.
+    Note that broadcast is given in units of lbs 
+    product/acre in product labels, but as lbs
+    AI/acre in Appendix K's tables.
+    '''
+    rate_ai = app['rate'] * app['percent'] / 100
+    if app['units'] == 'gal/acre':
+        rate_ai *= app['density']
+
+    broadcast = (app['strip'] / app['center'] *
+        app['area'] / app['block'] * rate_ai)
+
+    return broadcast
+
+def split_list(li, methods):
+    return [el for el in li if el['method'] in methods]
 
 def main(recalc, county, applications):
     '''Main routine'''
-    def split_apps(checklist):
-        x = list(zip(*[(a,i+1) for i,a in enumerate(applications)
-            if a['app_method'] in checklist]))
-        return x if x else [[], []]
-
-    # Check for prohibited applications
     for app in applications:
-        if app['app_method'] == konstants.app_methods[0]:
-            print('TIF strip shallow injection is prohibited. ' + 
+        # Prohibited-application check
+        if app['method'] == konstants.app_methods[0]:
+            print('TIF strip shallow injection is prohibited. ' +
                 konstants.assistance)
             sys.exit()
+        # Broadcast calculations
+        app['broadcast'] = broadcast_equiv_calc(app)
 
     # Split applications into lists of tif and untarped/non-tif
-    tif_methods = konstants.app_methods[1:5]
-    antitif_methods = konstants.app_methods[5:]
-    tif_apps, tif_apps_nums = split_apps(tif_methods)
-    other_apps, other_apps_nums = split_apps(antitif_methods)
+    tif_methods, other_methods = konstants.app_methods[1:5], konstants.app_methods[5:]
+    split_apps = functools.partial(split_list, applications)
+    tif_apps, other_apps = map(split_apps, (tif_methods, other_methods))
 
-    # Check acreage, (re)calculate buffers, and print results
+    # (Re)calculate buffers, checking acreage and broadcast rates against limits
     lookup_table = read_tables(konstants.app_methods[1:])
     cty_type = 'coastal' if county in konstants.coastal else 'inland'
     args_cb = [cty_type, lookup_table]
+
     if tif_apps:
-        check_acreage(tif_apps, 60, 'TIF')
         tif_buffers = [calculate_buffer(app, *args_cb) for app in tif_apps]
     else:
         tif_buffers = []
-    if other_apps:
-        check_acreage(other_apps, 40, 'non-TIF or untarped')
+    if other_apps and not recalc:
         other_buffers = [calculate_buffer(app, *args_cb) for app in other_apps]
-        if recalc:
-            other_buffers, other_apps = recalculate(other_apps, args_cb)
+    elif other_apps and recalc:
+        other_apps, other_buffers = recalculate(other_apps, args_cb)
     else:
         other_buffers = []
 
-    return list(zip(tif_buffers, tif_apps)), list(
-        zip(other_buffers, other_apps)), tif_apps_nums, other_apps_nums
+    apps, buffers = tif_apps + other_apps, tif_buffers + other_buffers
+    for i,app in enumerate(apps):
+        app['buffer'] = buffers[i]
+
+    return apps
 
 ##### More info on... #####
 # Defaultdicts:

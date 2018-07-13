@@ -15,10 +15,15 @@ import functools
 import sys
 import contextlib
 import os
+import csv
 import konstants
-import settings
 import appk
-import json
+import datetime
+import re
+from collections import namedtuple
+from collections import defaultdict
+from collections import OrderedDict
+from collections import deque
 
 
 def center_top_level(toplevel):
@@ -55,25 +60,46 @@ def onFrameConfigure(canvas):
     canvas.configure(scrollregion=canvas.bbox("all"))
 
 
-def make_help_label(self, row, msg, photo):
+def make_help_label(self, row, column, msg, photo):
     def show_help(event, msg):
         messagebox.showinfo('Help', msg)
-        
+
     l = ttk.Label(self, image=photo)
-    l.grid(row=row, column=3, sticky='W')
+    l.grid(row=row, column=column, sticky='W')
     l.bind('<Button-1>', functools.partial(show_help, msg=msg))
     return l
-
-
-def readDetailsFromFile():
-    pass
 
 
 def writeDetailsToFile():
     pass
 
-def toggle_mod_msg():
-    settings.show_mod_msg = not settings.show_mod_msg
+
+def read_csv(dir, filename):
+    with open(os.path.join(dir, filename), newline='') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',')
+        colnames = next(csvreader)
+        result = defaultdict(list)
+        for c in colnames:  # Initialize defaults (lists)
+            result[c]
+        for row in csvreader:
+            if all(row):  # Omit empty rows at bottom of csv files
+                for i,val in enumerate(row):
+                    result[colnames[i]].append(val)
+        return result
+
+
+def invalid_value(W, warning):
+    global root
+    widget = root.nametowidget(W)
+    if widget.get():  # Prevent cascading warnings
+        master = widget.master
+        master_type = type(master)
+        if master_type == Details:
+            master.mainframe._prompt(warning)
+        if master_type == MainFrame:
+            master._prompt(warning)
+        widget.delete(0, tk.END)
+        widget.focus_set()
 
 
 class Capturing(list):
@@ -92,11 +118,34 @@ class Capturing(list):
 class MainFrame(ttk.Frame):
     '''Main application window'''
     counties = sorted(konstants.coastal + konstants.inland)
-    texts = ['Application block size (acres):',
-             'Product application rate (lbs/acre):',
-             'Percent active ingredient:',
-             'Application method:']
-        
+    details_keys = ('date', 'block', 'rate', 'strip', 'center', 'area',
+        'regno', 'method')
+    details_text = OrderedDict(zip(details_keys, (
+        'Application date (yyyy-mm-dd):',
+        'Application block size (acres):',
+        'Product application rate (using treated acreage):',
+        'Strip or bed bottom width (inches):',
+        'Center-to-center row spacing (inches):',
+        'Area of strips or bed bottoms and rows (acres):',
+        'Registration Number:',
+        'Application method:')))
+    # main_keys = ['date', 'name', 'number', 'loc', 'county', 'overlap', 'apps']
+    main_text = [
+        'Date of Determination:',
+        'Permittee Name:',
+        'Permittee Number:',
+        'Site Location:',
+        'County:',
+        'Overlapping applications:',
+        'Applications:']
+
+    try:  # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
+        base_path = sys._MEIPASS
+    except:
+        base_path = os.getcwd()
+    products = read_csv(base_path, 'chloropicrin_products.csv')
+
+
     def __init__(self, parent, *args, **kwargs):
         '''https://stackoverflow.com/questions/4140437/interactively-
         validating-entry-widget-content-in-tkinter
@@ -122,133 +171,142 @@ class MainFrame(ttk.Frame):
         http://stupidpythonideas.blogspot.com/2013/12/whats-deal-with-
         ttkframeinitself-parent.html
         '''
+        def validate_county(P):
+            return P in self.counties
+
+        def invalid_county(W):
+            '''Runs when validate_county returns False
+            Clear county-combobox widget'''
+            warning = (
+                'The county you entered is invalid. Ensure that you enter '
+                'a valid county or select one from the dropdown list.')
+            invalid_value(W, warning)
+
         ttk.Frame.__init__(self, parent, *args, **kwargs)
 
         # Create and position mainframe labels
-        texts = ['County:', 'Overlapping applications:', 'Applications:']
-        for i,t in enumerate(texts):
+        for i,t in enumerate(self.main_text):
             ttk.Label(self, text=t).grid(
                     row=i, column=0, columnspan=2, sticky='W')
 
+        # Create and position useless mainframe widgets
+        UselessWidgets = namedtuple('UselessWidgets',
+            ['date', 'permittee_name', 'permittee_num', 'site_loc'])
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        useless = [ttk.Label(self, text=now)] + [
+            ttk.Entry(self) for _ in range(3)]
+        self.useless = UselessWidgets(*useless)
+        for i,v in enumerate(self.useless):
+            v.grid(row=i, column=2, sticky='WE')
+
         # Create and position mainframe county combobox
-        validate_county = functools.partial(validate, self.counties)
         vcmd = (self.register(validate_county), '%P')
-        self.county = ttk.Combobox(self, values=self.counties, validate='key',
-            validatecommand=vcmd)
-        self.county.grid(row=0, column=2, sticky='WE')
+        invcmd = (self.register(invalid_county), '%W')
+        self.county = ttk.Combobox(self, values=self.counties, validate='focusout',
+            validatecommand=vcmd, invalidcommand=invcmd)
+        county_row = self.main_text.index('County:')
+        self.county.grid(row=county_row, column=2, sticky='WE')
 
         # Create and position mainframe checkbox toggling overlap calc.
-        self.var = tk.IntVar()
-        self.overlap = ttk.Checkbutton(self, variable=self.var)
-        self.overlap.grid(row=1, column=2, sticky='W')
+        self.overlap_var = tk.IntVar()
+        self.overlap = ttk.Checkbutton(self, variable=self.overlap_var)
+        overlap_row = self.main_text.index('Overlapping applications:')
+        self.overlap.grid(row=overlap_row, column=2, sticky='W')
         # self.overlap.invoke()  # Toggles state of Checkbutton
 
-        # Create, position, and bind help labels:
-        try:  # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
-            base_path = sys._MEIPASS
-        except:
-            base_path = os.getcwd()
-        photo_path = os.path.join(base_path, 'help.gif')
+        # Create, position, and bind help-labels:
+        photo_path = os.path.join(self.base_path, 'help.gif')
         self.photo = tk.PhotoImage(file=photo_path).subsample(30,30)
-        msgs = [konstants.county_msg, konstants.overlap_msg]
-        for i in range(0, 2):
-            make_help_label(self, row=i, msg=msgs[i], photo=self.photo)
-
-        # Prepare photo for later creation of a label
-        # photo_path2 = os.path.join(base_path, 'dpr_logo.gif')
-        photo_path2 = os.path.join(base_path, 'dprlogo_3.gif')
-        self.logophoto = tk.PhotoImage(file=photo_path2).subsample(4,4)
+        make_help_label(self, row=county_row, column=3, msg=konstants.county_msg, photo=self.photo)
+        make_help_label(self, row=overlap_row, column=3, msg=konstants.overlap_msg, photo=self.photo)
 
         # Create movable action buttons (don't position yet)
-        self.adder = ttk.Button(self, text='+', command=self.add_button)
-        self.remover = ttk.Button(self, text='-', command=self.rm_button)
-        self.submitter = ttk.Button(self, text='Calculate buffer zones',
+        self.movable = {}
+        self.movable['adder'] = ttk.Button(self, text='+', command=self.add_button)
+        self.movable['remover'] = ttk.Button(self, text='-', command=self.rm_button)
+        self.movable['submitter'] = ttk.Button(self, text='Calculate buffer zones',
             command=self._run)
-        self.movable = [self.adder, self.remover, self.submitter]
 
         # Other instance variables
         self.root = self.winfo_toplevel()
         self.applications = []
         self.details = []
 
-    def hide(self):
-        self.root.withdraw()
-
-    def show(self):
-        # self.root.update()
-        self.root.deiconify()
-    
     def add_button(self):
         '''Add button for an application, provided details have been added'''
-        if self.applications:
-           if not self._verify_details():
-               return
-           if not self._verify_all_details():
-               return
-           
-        app_number = len(self.applications) + 1
-        text = 'Application {} Details'.format(app_number)
-        idx = len(self.applications)
-        button = ttk.Button(
-            self, text=text, command=lambda idx=idx: self._add_details(idx))
-        self.applications.append(button)
-        
-        # Prepare to display inputs on main screen under each button
-        button.details_labels = [ttk.Label(self, text=t) for t in self.texts]
-        button.details = [ttk.Label(self, text='') for t in self.texts]
+        def hide_main(self, idx):
+            '''Open window to input application-specific parameters'''
+            self.details[idx].geometry(self.root.geometry())
+            self.details[idx].deiconify()  # show application window
+            self.root.withdraw()
 
-        button_row = len(self.movable) + (idx * (len(self.texts) + 1))
+        # Create application button
+        idx = len(self.applications)
+        app_number = idx + 1
+        text = 'Application {} Details'.format(app_number)
+        button = ttk.Button(
+            self, text=text, command=functools.partial(hide_main, self, idx))
+        self.applications.append(button)
+
+        # Create Details object. Note that it will update button.details'
+        # text with inputs when it is hidden
+        self.details.append(
+            Details(self, app_number))
+        button.details_labels = [ttk.Label(self, text=v) for _,v in self.details_text.items()]
+        button.details = [ttk.Label(self, text='') for _ in self.details_text.keys()]
+
+        # Display new button and (initially empty) inputs underneath
+        button_row = len(self.main_text) + (idx * (len(self.details_text) + 1))
         button.grid(row=button_row, column=2, sticky='WE')
         for i, dl in enumerate(button.details_labels):
             dl.grid(row=button_row + i + 1, column=2, sticky='W')
             button.details[i].grid(
                 row=button_row + i + 1, column=3, sticky='W')
-            
-        self._adjust_buttons(button_row)
+
+        self._adjust_buttons(button_row)  # Adjust movable buttons
 
     def rm_button(self):
         '''Remove newest app button and associated widgets, if multiple
         buttons exist'''
         idx = len(self.applications)
+    
         if idx > 1:
-            button = self.applications[-1]
+            # Destroy all objects for this application
+            button = self.applications.pop()
             for i, dl in enumerate(button.details_labels):
                 dl.destroy()
                 button.details[i].destroy()
-            if len(self.details) == len(self.applications):
-                x = self.details.pop()
-                x.destroy()
-            x = self.applications.pop()
-            x.destroy()
-            button_row = \
-                len(self.movable) + ((idx - 2) * (len(self.texts) + 1))
+            button.destroy()
+            details = self.details.pop()
+            details.destroy()
+
+            # Adjust movable buttons
+            button_row = len(self.main_text) + ((idx - 2) * (len(self.details_text) + 1))
             self._adjust_buttons(button_row)
 
     def _adjust_buttons(self, row):
         '''Adjust other buttons to accommodate new/rm application button'''
-        self.adder.grid(row=row, column=0)
-        self.remover.grid(row=row, column=1)
-        offset = row + len(self.texts) + 1
-        self.submitter.grid(row=offset, column=2, sticky='WE',
+        offset = row + len(self.details_text) + 1
+
+        # Movable action buttons
+        self.movable['adder'].grid(row=row, column=0)
+        self.movable['remover'].grid(row=row, column=1)
+        self.movable['submitter'].grid(row=offset, column=2, sticky='WE',
             pady=25)  # Add space between rows. (padx shirnks widget width.)
-        if not hasattr(self, 'submitter_help'):  # The only help button that
-            self.submitter_help = make_help_label(  # moves around
-                self, row=offset, msg=konstants.app_msg, photo=self.photo)
-        self.submitter_help.grid(row=offset, column=3, sticky='W')
+
+        # The only help button that moves around
+        if not hasattr(self, 'submitter_help'): 
+            self.submitter_help = make_help_label(  
+                self, row=offset, column=3, msg=konstants.app_msg, photo=self.photo)
+        else:
+            self.submitter_help.grid(row=offset, column=3, sticky='W')
+            
         # DPR Logo
         if not hasattr(self, 'logo'):
+            photo_path = os.path.join(self.base_path, 'dprlogo_3.gif')
+            self.logophoto = tk.PhotoImage(file=photo_path).subsample(3,3)
             self.logo = ttk.Label(self, image=self.logophoto)
-        self.logo.grid(row=offset+1, column=1, columnspan=2, sticky='EW')
-
-    def _add_details(self, idx):
-        '''Open window to input application-specific parameters'''
-        self.hide()
-        if not self.details[idx:idx + 1]:
-            app_number = idx + 1
-            self.details.append(Details(self, app_number))
-            # NOTE: Instantiation will show window automatically
-        else:
-            self.details[idx].show()
+        self.logo.grid(row=offset+1, column=0, columnspan=4, sticky='EW')
 
     def _run(self):
         '''Run command line script (appk.py) for buffer zone calculation
@@ -256,16 +314,26 @@ class MainFrame(ttk.Frame):
         NOTE: tkinter.Entry.get is the method used by all widgets
         NOTE: argparse.ArgumentParser.parse_args requires a flat list
         '''
-        recalc = True if self.var.get() else False
+        def show_results(results):
+            messagebox.showinfo('Buffer Zone Determination', results)
+
+        def get_app_num(app):
+            num = app['number']
+            return num if isinstance(num, int) else int(num[0])
+
+        def split_list(li, length):
+            return [li[i:i+rpw] for i in range(0, len(li), length)]
+
+        # Extract values from main and application widgets
+        recalc = True if self.overlap_var.get() else False
         county = self._verify_county()
-        app_details = self._verify_all_details()
-        if not self._verify_details() or not app_details or not county:
-            return 
-        
+        app_details = self._verify_details()
+        if not app_details or not county:
+            return
+
         # Pass args to appk.py and collect results
         with contextlib.suppress(SystemExit), Capturing() as out:
-            tif, other, tif_nums, other_nums =\
-                appk.main(recalc, county, app_details)
+            apps = appk.main(recalc, county, app_details)
 
         # Display "error" messages
         out = ''.join(out)
@@ -274,108 +342,150 @@ class MainFrame(ttk.Frame):
             return
 
         # Display results
-        if recalc and other:  
-            if settings.show_mod_msg:
-                self._show_results(konstants.mod_msg)
-            other_nums = [', '.join(str(o) for o in other_nums)]
-        prefix = 'TIF Applications\n\n'
-        prefix2 = 'Non-TIF and Untarped Applications\n\n'
-        results = self._construct_results(tif, tif_nums, prefix)
-        results = self._construct_results(other, other_nums, prefix2, results) 
-        self._show_results(results)
+        if recalc:
+            show_results(konstants.mod_msg)
+        apps = sorted(apps, key=get_app_num)
+        rpw = 3  # results per window
+        split_list_rpw = functools.partial(split_list, length=rpw)
+        apps_split = split_list_rpw(apps)
+        for i,group in enumerate(apps_split):
+            results = self._construct_results(
+                group, i+1, len(apps_split))
+            show_results(results)
 
     @staticmethod
     def _prompt(warning):
         messagebox.showwarning('Warning', warning)
-        
+
     def _verify_county(self):
         '''Verify that the county has been entered (fully)'''
         county = self.county.get()
         if not county or county not in self.counties:
             warning = ('Please specify the county in which the '
-                       'application(s) will take place. Ensure that the '
-                       'county is fully typed out or else is selected '
-                       'from the dropdown.')
+                    'application(s) will take place. Ensure that the '
+                    'county is fully typed out or else is selected '
+                    'from the dropdown.')
             self._prompt(warning)
             return False
         return county
-    
-    def _verify_all_details(self):
-        '''Verify that each application with a details window has all 
-        details and prepare inputs for appk.py'''
-        warning = ('Some applications are missing necessary '
-                   'details. Please fill out all of the fields '
-                   'listed in each application window.')
-        warning2 = ('Ensure that the application method for each '
-                   'application is fully typed out or else is '
-                   'selected from the dropdown.')
-        app_args = [[tk.Entry.get(i) for i in d.app_details]
-            for d in self.details]     
-        for app_arg in app_args:
-            if not all(app_arg):
-                self._prompt(warning)
-                return False
-            if app_arg[-1] not in konstants.app_methods:
-                self._prompt(warning2)
-                return False
-        # Convert numeric-string inputs to floating point numbers
-        for app in app_args:
-            app[:-1] = [float(arg) for arg in app[:-1]]
-        applications = [dict(zip(konstants.keys, values)) 
-            for values in app_args]
-        return applications
-        
-    def _verify_details(self):
-        '''Verify each application is associated with a details window'''
-        warning = ('There are applications for which details have not '
-                   'been added. Please add details for each application '
-                   'or remove unnecessary applications.')
-        if len(self.applications) != len(self.details):
-            self._prompt(warning)
-            return False
-        return True
 
-    def _construct_results(self, apps, apps_nums, prefix, results=''):
-        template = ('Application {}:\n'
-                    'Buffer zone distance: {} feet\n'
-                    '(Calculated using {}.)\n\n')
-        results += prefix
-        if not apps:
-            results += 'Not Applicable\n\n'
-        for i,app in enumerate(apps):
-            method = app[1]['app_method']
-            result = app[0]
-            results += template.format(apps_nums[i], 
-                                       result,
-                                       self._tbl_num(method)) 
-        return results
+    def _verify_details(self):
+        '''Verify that each application with a details window has all
+        details, retrieve widget values for appk.py, use value of
+        registration number to retrieve relevant values from the 
+        products table, and convert numeric strings to numeric'''
+        warning = (
+            'Applications {} are missing necessary '
+            'details. Please fill out all of the fields '
+            'listed in each application window.')    
         
+        def check_app_details(widgets_dict, app_num):
+            '''NOTE: tk.Combobox.get is in fact tk.Entry.get'''
+
+            def check_detail(widget):
+                user_input = tk.Entry.get(widget)
+                try:
+                    return float(user_input)
+                except ValueError:
+                    return user_input
+
+            app = {k:check_detail(v) for k,v in widgets_dict.items()}
+
+            if not all(app.values()):
+                return False
+
+            prod_idx = self.products['SHOW_REGNO'].index(app['regno'])
+            app['number'] = app_num
+            app['density'] = float(
+                self.products['Density (lb/gallon)'][prod_idx])
+            app['percent'] = float(
+                self.products['PRODCHEM_PCT'][prod_idx])
+            app['name'] = self.products['PRODUCT_NAME'][prod_idx]
+
+            return app
+        
+        apps = [check_app_details(d.app_details, i+1) 
+            for i,d in enumerate(self.details)]
+        missing = [str(i+1) for i,a in enumerate(apps) if not a]
+        if missing:
+            self._prompt(
+                warning.format(
+                    ', '.join(missing)))
+            return False
+
+        return apps
+
     def _tbl_num(self, method):
-        '''Return table used to determine buffer, 
+        '''Return table used to determine buffer,
         as listed in Appendix K'''
         county = self.county.get()
         files = (konstants.coastal_csv if county in konstants.coastal
             else konstants.inland_csv)
         file = files[konstants.app_methods[1:].index(method)]
-        return file.split('.')[0]
-    
-    @staticmethod
-    def _show_results(results):
-        messagebox.showinfo('Buffer Zone Determination', results)
+        prefix = file.split('.')[0]
+        re_list = re.split('(\d+)', prefix)
+        list_filt = [s for s in re_list if s]
+        tbl = ''
+        for i, s in enumerate(list_filt):
+            if i == 1:
+                tbl += ' {}'.format(s)
+            else:
+                tbl += s
+        return tbl    
+
+    def _construct_results(self, apps, win_num=None, win_num_max=None, results=''):
+        template = (
+            'Application {}:\n'
+            'Product Name: {}\n'
+            'Buffer zone distance: {} feet\n'
+            '(Calculated using {}, a broadcast-equivalent rate '
+            'of roughly {} lbs A.I./acre and an application '
+            'block of roughly {} acres.)\n\n')
+
+        for app in apps:
+            results += template.format(
+                app['number'],
+                app['name'],
+                app['buffer'],
+                self._tbl_num(app['method']),
+                konstants.truncate(app['broadcast'], n=1),
+                konstants.truncate(app['block'], n=1))
+
+        if win_num and win_num_max:
+            results += 'Results {} of {}'.format(
+                win_num, win_num_max)
+        return results
 
 class Details(tk.Toplevel):
     '''Window for filling in application details'''
 
-    def __init__(self, mainframe, app_number):
+    def __init__(self, mainframe, app_number):        
+        def validate_date(P):
+            '''Ensure yyyy-mm-dd format'''
+            try:
+                year, month, day = [int(s) for s in P.split('-')]
+                datetime.date(year=year,month=month,day=day)
+            except ValueError:  # Covers both not enough values
+                # to unpack and invalid inputs to datetime()
+                return False
+            else:
+                return True
+
+        def validate_app_method(P):
+            return P in konstants.app_methods
+
+        def validate_regno(P):
+            return P in self.mainframe.products['SHOW_REGNO']
+
         def validate_entry(P):
             '''Ensure that input is numeric
-            
+
             Note that this method is called twice when replacing a selection
             with input. Once, with d='0' (if %d is used as a parameter), then
             with d='1'. For this reason it is impossible to differentiate b/w
             clearing a selection for a valid input and an invalid input.
             Clearing will take place regardless, but invalid inputs will not be
-            entered afterward.'''        
+            entered afterward.'''
             try:
                 float(P)
             except ValueError:
@@ -384,85 +494,146 @@ class Details(tk.Toplevel):
                 return False
             else:
                 return True
-            
+
+        def invalid_date(W):
+            '''Runs when validate_date returns False
+            Clear date-entry widget'''
+            warning = (
+                'The date you entered is invalid. Ensure that you enter '
+                'a valid date in the "yyyy-mm-dd" format.')
+            invalid_value(W, warning)
+
+        def invalid_app_method(W):
+            warning = (
+                'The application method you entered is invalid. Ensure that you enter '
+                'a valid method or select one from the dropdown list.')
+            invalid_value(W, warning)
+
+        def invalid_regno(W):
+            warning = (
+                'The registration number you entered is invalid. Ensure that you enter '
+                'a valid registration number or select one from the dropdown list.')
+            invalid_value(W, warning)
+
         # Configure window properties
         if sys.platform == 'darwin':  # http://wiki.tcl.tk/44444
             tk.Toplevel.__init__(self, background='#e6e6e6')
         else:
             tk.Toplevel.__init__(self)
+
+        # Since tk displays newly created windows, hide this window until
+        # user clicks the associated application button on main screen
+        self.withdraw()
+
         self.mainframe = mainframe
-        self.geometry(mainframe.root.geometry())
         self.title('Appendix K - Application {} Details'.format(app_number))
         self.app_number = app_number
 
+        keys = [k for k in self.mainframe.details_keys if k != 'date']
+        self.msgs = OrderedDict(zip(keys, [
+            konstants.block_size_msg,
+            konstants.rate_msg,
+            konstants.strip_msg,
+            konstants.center_msg,
+            konstants.area_msg,
+            konstants.regno_msg,
+            konstants.method_msg]))
+
         # Create and position label widgets
-        texts = ['Application block size (acres):',
-                'Product application rate (lbs/acre):',
-                'Percent active ingredient:',
-                'Application method:']
-        for i, t in enumerate(texts):
-            ttk.Label(self, text=t).grid(row=i, column=0, sticky='W')
+        for i, v in enumerate(mainframe.details_text.values()):
+            ttk.Label(self, text=v).grid(row=i, column=0, sticky='W')
 
-        # Create entry widgets
-        vcmd = (self.register(validate_entry), '%P')
-        entries = [ttk.Entry(self, validate='key', validatecommand=vcmd)
-                        for _ in range(3)]        
+        # Create date entry
+        custom_details = 0
+        vcmd = (self.register(validate_date), '%P')
+        invcmd = (self.register(invalid_date), '%W')
+        date = ttk.Entry(self, validate='focusout', validatecommand=vcmd,
+            invalidcommand=invcmd)
+        custom_details += 1
 
-        # Create combobox widget
-        validate_app_method = functools.partial(validate, 
-                                                konstants.app_methods)
-        vcmd_meth = (self.register(validate_app_method), '%P')
+        # Create combobox widget for registration-number input
+        vcmd = (self.register(validate_regno), '%P')
+        invcmd = (self.register(invalid_regno), '%W')
+        regno = ttk.Combobox(self,
+                             width=40,
+                             values= mainframe.products['SHOW_REGNO'],
+                             validate='focusout',
+                             validatecommand=vcmd,
+                             invalidcommand=invcmd)
+        custom_details += 1
+
+        # Create combobox widget for application-method input
+        vcmd = (self.register(validate_app_method), '%P')
+        invcmd = (self.register(invalid_app_method), '%W')
         app_method = ttk.Combobox(self,
                                   width=40,
                                   values=konstants.app_methods,
-                                  validate='key',
-                                  validatecommand=vcmd_meth)
+                                  validate='focusout',
+                                  validatecommand=vcmd,
+                                  invalidcommand=invcmd)
+        custom_details += 1
 
-        # Position entry and combobox widgets
-        self.app_details = entries + [app_method]
-        for i in range(len(self.app_details)):
-            self.app_details[i].grid(row=i, column=1, sticky='WE')
+        # Create entry widgets for all but one input (see below)
+        vcmd = (self.register(validate_entry), '%P')
+        entries = [ttk.Entry(self, validate='key', validatecommand=vcmd)
+            for _ in range(len(mainframe.details_text)-custom_details)]
 
-        # Create and position help labels
-        msgs = [konstants.block_size_msg, konstants.rate_msg,
-                konstants.percent_active_msg, konstants.method_msg]
-        for i in range(4):
-            make_help_label(self, row=i, msg=msgs[i],
-                photo=self.mainframe.photo)
+        # Collect (i.e., into a OrderedDict) and position widgets
+        entries.insert(mainframe.details_keys.index('date'), date)
+        entries.insert(mainframe.details_keys.index('regno'), regno)
+        entries.insert(mainframe.details_keys.index('method'), app_method)
+        for e in entries:  # Fix tab order (defaults to creation order)
+            e.lift()
+        self.app_details = OrderedDict(zip(
+            mainframe.details_text.keys(),
+            entries))
+        for i, v in enumerate(self.app_details.values()):
+            v.grid(row=i, column=1, sticky='WE')
 
-        # Create and position window navigation button
-        ttk.Button(self, text='Save and Return to main screen', command=self._close
-                   ).grid(row=4, column=1, pady=20)
+        # Create and position help labels for inputs
+        for k,v in self.msgs.items():
+            i = mainframe.details_keys.index(k)
+            make_help_label(self, row=i, column=2, msg=v,
+                photo=mainframe.photo)
 
-    def show(self):
-        # self.update()
-        self.geometry(self.mainframe.root.geometry())
-        self.deiconify()
+        # Create and position combox widget for app-method units selection
+        self.app_details['units'] = ttk.Combobox(
+            self, width=20, values=('lbs/acre', 'gal/acre'))
+        row=list(self.app_details.keys()).index('rate')
+        self.app_details['units'].grid(row=row, column=3)
 
-    def hide(self):
-        '''Update mainframe labels with input details and hide window'''
+        # Create and position navigation button to main screen
+        ttk.Button(self, text='Save and Return to main screen', command=self._hide
+                   ).grid(row=len(self.app_details), column=1, pady=20)
+
+    def _hide(self):
+        '''Update mainframe labels with input details and hide window.'''
         idx = self.app_number - 1
         button = self.mainframe.applications[idx]
-        for i, d in enumerate(button.details):
-            d.configure(text=self.app_details[i].get()) 
+        ad_values = [v.get() if k != 'rate'
+            else v.get() + ' ' + self.app_details['units'].get()
+            for k,v in self.app_details.items()]
 
+        for i, d in enumerate(button.details):
+            d.configure(text=ad_values[i])
+
+        self.mainframe.root.geometry(self.geometry())
+        # w, h = root.winfo_screenwidth(), root.winfo_screenheight()
+        # self.mainframe.root.geometry('{}x{}+0+0'.format(w, h))
+        self.mainframe.root.deiconify()  # show main frame
         self.withdraw()
 
-    def _close(self):
-        self.hide()
-        self.mainframe.show()
-        
 
 #==============================================================================
-# Spawn a TCL interpreter and set top window properties
+# Spawn a TCL interpreter
 #==============================================================================
 root = tk.Tk()
-root.title('Appendix K')
-root.geometry("600x400")
+root.title('Appendix K (Version June 2018)')
+root.geometry("710x500")
 center_top_level(root)
 
 #==============================================================================
-# Create a "scrollable window" when elements exceed window size
+# Create a "scrollable window"
 #
 # (See 'Tkinter 8.5 reference: a GUI for Python' and
 #  https://stackoverflow.com/questions/3085696/adding-a-scrollbar-to-a-group-
@@ -478,6 +649,7 @@ else:
 
 frame = MainFrame(canvas)
 frame.add_button()  # Button for a single application window
+# Function is triggered whenever the frame changes size (or location on some platforms)
 frame.bind("<Configure>", lambda event, canvas=canvas: onFrameConfigure(canvas))
 
 vsb = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
@@ -486,6 +658,39 @@ vsb.pack(side="right", fill="y")
 canvas.configure(yscrollcommand=vsb.set)
 canvas.pack(side="left", fill="both", expand=True)
 canvas.create_window((4, 4), window=frame, anchor='nw')
+
+#==============================================================================
+# Inform the user that the tool is intended only for chloropicrin use
+#==============================================================================
+msg = ('NOTE: This tool is only for applications of products with a chloropicrin '
+    'content of 2% or more, products containing chloropicrin and another fumigant, '
+    'or simultaneous applications of chloropicrin and another fumigant.\n\n'
+    'This tool is based on CDPR\'s "Pesticide Use Enforcement Program Standards '
+    'Compendium, Volume 3, Appendix K: Chloropicrin and Chloropicrin in '
+    'Combination with Other Products (Field Fumigant) Recommended Permit Conditions '
+    '(41st Revision - December 2017)," as well as the information at the following '
+    'web page referenced by Appendix K: https://www.cdpr.ca.gov/chloropicrin.htm.')
+messagebox.showinfo('Help', msg)
+
+#==============================================================================
+# Set top window properties
+#==============================================================================
+# # Get size of usable screen. (A bit of a hack.)
+# root.attributes('-alpha', 0)
+# root.state('zoomed')
+# root.update()  # Otherwise we will see maxw, maxh = 1, 1
+# maxw = root.winfo_width()
+# maxh = root.winfo_height()
+
+# # Reset attributes and configure geometry
+# swidth=vsb.winfo_width()
+# root.state('normal')  # NOTE: This is what causes the vanishing title bar effect
+# starting_size = "710x500+0+0"
+# # root.geometry(starting_size)
+# # center_top_level(root)
+# print(swidth)
+# root.geometry('{}x{}+0+0'.format(maxw-swidth, maxh))
+# root.attributes('-alpha', 1)
 
 #==============================================================================
 # Run event loop / spawn the application

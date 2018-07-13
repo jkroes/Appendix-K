@@ -19,3 +19,9 @@ zones.
 for each script argument. (See 'python appendix_k.py -h'.)
 7. User must calculate broadcast-equivalent application rate
 from pesticide product label. 
+
+Known bugs:
+Maximizing windows causes a bug (in the geometry method of tkinter's widgets) to manifest
+when switching between the main window and application windows. The second window will not
+be aligned with the previously maximized window, and switching again will use whatever size
+and position the second window has at the time of the second switch.

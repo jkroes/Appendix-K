@@ -7,6 +7,12 @@ Unit: Air Program
 Date: 5/4/18
 """
 
+def truncate(f, n):
+    '''Truncates/pads a float f to n decimal places without rounding'''
+    s = str(f)
+    i, _, d = s.partition('.')
+    return '.'.join([i, (d+'0'*n)[:n]])
+
 app_methods = [
     'tif strip shallow injection',  # PROHIBITED METHOD
     'tif broadcast shank injection',
@@ -46,9 +52,6 @@ inland_csv = [
     'Table6b.csv', 'Table7b.csv', 'Table8b.csv', 'Table9b.csv',
     'Table10b.csv', 'Table11b.csv', 'Table12.csv']
 
-keys = [
-    'app_block_size', 'product_app_rate', 'percent_active', 'app_method']
-
 assistance = ('Contact the California Department of Pesticide '
               'Regulation for assistance.')
 
@@ -57,7 +60,7 @@ assistance2 = assistance.split()[0].lower() + ' ' + ' '.join(
 
 assistance = (
     'Please check that your inputs are correct. If the inputs are valid and '
-    'the problem persists, then please '    
+    'the problem persists, then please '
 ) + assistance2
 
 mod_msg = ('NOTE: Displayed "inputs" may differ from user inputs for '
@@ -88,14 +91,33 @@ county_msg = ('County in which the application takes place, chosen from this '
 block_size_msg = ('Size of the application block, given in acres. '
                   'Application block size is limited to 60 acres for '
                   'applications using totally impermeable films (TIF) and '
-                  '40 acres for non-TIF and untarped applications.')
+                  '40 acres for non-TIF and untarped applications. '
+                  'The application block is defined by US EPA as the acreage within '
+                  'the perimeter of the fumigated portion of a field '
+                  '(including, e.g., furrows, irrigation ditches, and roadways). '
+                  'The perimeter of the application block is the border that '
+                  'connects the outermost edges of total area treated with '
+                  'the fumigant product. For California, an application block '
+                  'is also a field or the portion of a field treated in a 24-hour '
+                  'period that typically is identified by visible indicators, maps '
+                  'or other tangible means.')
 
 rate_msg = (
-    'Broadcast-equivalent application rate for the product, given in pounds '
-    'per acre.')
+    'Pounds of product per total area treated, where area treated is defined '
+    'as the area of each treated bed bottom or strip located within the '
+    'application block.')
 
-percent_active_msg = (
-    'Percent of chloropicrin listed on the product label, given as a number '
-    'between 0 and 100 without a percentage sign.')
+strip_msg = (
+    'Width of strips or bed bottoms, given in inches.')
+
+center_msg = (
+    'Distance between the centers of adjacent strips or beds, '
+    'given in inches.')
+
+area_msg = (
+    'Sum of the acreage of strips or beds plus the acreage of '
+    'rows between beds or strips')
+
+regno_msg = 'Registration number, chosen from this list of options.'
 
 method_msg = 'Method of application, chosen from this list of options.'
