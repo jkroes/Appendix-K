@@ -114,10 +114,6 @@ center_msg = (
     'Distance between the centers of adjacent strips or beds, '
     'given in inches.')
 
-area_msg = (
-    'Sum of the acreage of strips or beds plus the acreage of '
-    'rows between beds or strips')
-
 regno_msg = 'Registration number, chosen from this list of options.'
 
 method_msg = 'Method of application, chosen from this list of options.'

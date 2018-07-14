@@ -118,15 +118,13 @@ class Capturing(list):
 class MainFrame(ttk.Frame):
     '''Main application window'''
     counties = sorted(konstants.coastal + konstants.inland)
-    details_keys = ('date', 'block', 'rate', 'strip', 'center', 'area',
-        'regno', 'method')
+    details_keys = ('date', 'block', 'rate', 'strip', 'center', 'regno', 'method')
     details_text = OrderedDict(zip(details_keys, (
         'Application date (yyyy-mm-dd):',
         'Application block size (acres):',
         'Product application rate (using treated acreage):',
         'Strip or bed bottom width (inches):',
         'Center-to-center row spacing (inches):',
-        'Area of strips or bed bottoms and rows (acres):',
         'Registration Number:',
         'Application method:')))
     # main_keys = ['date', 'name', 'number', 'loc', 'county', 'overlap', 'apps']
@@ -375,7 +373,7 @@ class MainFrame(ttk.Frame):
         registration number to retrieve relevant values from the 
         products table, and convert numeric strings to numeric'''
         warning = (
-            'Applications {} are missing necessary '
+            'Application(s) {} are missing necessary '
             'details. Please fill out all of the fields '
             'listed in each application window.')    
         
@@ -383,6 +381,7 @@ class MainFrame(ttk.Frame):
             '''NOTE: tk.Combobox.get is in fact tk.Entry.get'''
 
             def check_detail(widget):
+                ### Can I just use widget.get()? ###
                 user_input = tk.Entry.get(widget)
                 try:
                     return float(user_input)
@@ -439,8 +438,8 @@ class MainFrame(ttk.Frame):
             'Product Name: {}\n'
             'Buffer zone distance: {} feet\n'
             '(Calculated using {}, a broadcast-equivalent rate '
-            'of roughly {} lbs A.I./acre and an application '
-            'block of roughly {} acres.)\n\n')
+            'of {} lbs A.I./acre and an application '
+            'block of {} acres.)\n\n')
 
         for app in apps:
             results += template.format(
@@ -535,7 +534,6 @@ class Details(tk.Toplevel):
             konstants.rate_msg,
             konstants.strip_msg,
             konstants.center_msg,
-            konstants.area_msg,
             konstants.regno_msg,
             konstants.method_msg]))
 
@@ -608,14 +606,24 @@ class Details(tk.Toplevel):
 
     def _hide(self):
         '''Update mainframe labels with input details and hide window.'''
+        ### Can I just use widget.get()? ###
+        keys = list(self.app_details.keys())
+        vals = [tk.Entry.get(k) for k in self.app_details.values()]
+
+        if vals[keys.index('rate')]:
+            vals[keys.index('rate')] +=  ' ' + vals[keys.index('units')]
+
+        regno = vals[keys.index('regno')]
+        if regno:
+            products = self.mainframe.products
+            prod_idx = products['SHOW_REGNO'].index(regno)
+            name = products['PRODUCT_NAME'][prod_idx]
+            vals[keys.index('regno')] += ' ' + '({})'.format(name)
+
         idx = self.app_number - 1
         button = self.mainframe.applications[idx]
-        ad_values = [v.get() if k != 'rate'
-            else v.get() + ' ' + self.app_details['units'].get()
-            for k,v in self.app_details.items()]
-
         for i, d in enumerate(button.details):
-            d.configure(text=ad_values[i])
+            d.configure(text=vals[i])
 
         self.mainframe.root.geometry(self.geometry())
         # w, h = root.winfo_screenwidth(), root.winfo_screenheight()

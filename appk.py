@@ -139,8 +139,7 @@ def broadcast_equiv_calc(app):
     if app['units'] == 'gal/acre':
         rate_ai *= app['density']
 
-    broadcast = (app['strip'] / app['center'] *
-        app['area'] / app['block'] * rate_ai)
+    broadcast = rate_ai * app['strip'] / app['center']
 
     return broadcast
 
