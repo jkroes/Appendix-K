@@ -1,10 +1,32 @@
 ﻿# -*- coding: utf-8 -*-
 """
-Author: Justin Lawrence Kroes
-Agency: Department of Pesticide Regulation
-Branch: Environmental Monitoring
-Unit: Air Program
-Date: 4/30/18
+Copyright (c) 2018, California Department of Pesticide Regulation, All rights
+reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import tkinter as tk
@@ -16,7 +38,6 @@ import sys
 import contextlib
 import os
 import csv
-import konstants
 import appk
 import datetime
 import re
@@ -24,6 +45,75 @@ from collections import namedtuple
 from collections import defaultdict
 from collections import OrderedDict
 from collections import deque
+
+county_msg = (
+    'County in which the application(s) take place, chosen from this list of '
+    'options.'
+)
+broad_msg = (
+    'Broadcast-equivalent application rate, given in pounds or gallons of '
+    'product per treated acre, where acreage treated is defined as the '
+    'acreage of each treated bed bottom or strip located within the '
+    'application block.'
+)
+mod_msg = (
+    'NOTE: Displayed "inputs" may differ from user inputs for '
+    'overlapping non-TIF or untarped application blocks. A single '
+    'buffer zone is calculated based on total acreage and largest '
+    'application rate, using the table for whichever of the '
+    'application methods specified by the user returns the largest '
+    'buffer-zone distance. The inputs listed here are the inputs used '
+    'to find this buffer-zone distance.'
+)
+app_msg = (
+    'Calculate buffer zone as part of recommended permit conditions '
+    'for chloropicrin and chloropicrin/1,3-D products.'
+)
+overlap_msg = (
+    'Buffer zones for two or more applications may overlap spatially '
+    'within 36 hours from the end of each earlier application to the '
+    'start of each subsequent application. In this event, a single '
+    'buffer zone needs to be calculated for each group of overlapping '
+    'applications. If this option is checked, only input applications that '
+    'overlap each other. If you wish to input multiple groups of overlapping '
+    'applications, run the tool once for each such group; otherwise, '
+    'incorrect buffer zones may result. See the README file for more '
+    'information.'
+)
+broad_opt_msg = (
+    'Toggle this checkbox if inputting the broadcast-equivalent application '
+    'rate directly. Do not toggle this checkbox if you need the broadcast '
+    'rate to be calculated from the product application rate.'
+)
+block_msg = (
+    'Size of the application block, given in acres. '
+    'Application block size is limited to 60 acres for '
+    'applications using totally impermeable films (TIF) and '
+    '40 acres for non-TIF and untarped applications. '
+    'The application block is defined by US EPA as the acreage within '
+    'the perimeter of the fumigated portion of a field '
+    '(including, e.g., furrows, irrigation ditches, and roadways). '
+    'The perimeter of the application block is the border that '
+    'connects the outermost edges of total area treated with '
+    'the fumigant product. For California, an application block '
+    'is also a field or the portion of a field treated in a 24-hour '
+    'period that typically is identified by visible indicators, maps '
+    'or other tangible means.'
+)
+rate_msg = (
+    'Pounds or gallons of product per treated acre, where acreage treated is '
+    'defined as the acreage of each treated bed bottom or strip located '
+    'within the application block.'
+)
+strip_msg = (
+    'Width of strips or bed bottoms, given in inches.'
+)
+center_msg = (
+    'Distance between the centers of adjacent strips or beds, '
+    'given in inches.'
+)
+regno_msg = 'Registration number, chosen from this list of options.'
+method_msg = 'Method of application, chosen from this list of options.'
 
 
 def center_top_level(toplevel):
@@ -60,12 +150,13 @@ def onFrameConfigure(canvas):
     canvas.configure(scrollregion=canvas.bbox("all"))
 
 
-def make_help_label(self, row, column, msg, photo):
+def make_help_label(self, msg, photo, row=None, column=None):
     def show_help(event, msg):
         messagebox.showinfo('Help', msg)
 
     l = ttk.Label(self, image=photo)
-    l.grid(row=row, column=column, sticky='W')
+    if row is not None and column is not None:
+        l.grid(row=row, column=column, sticky='W')
     l.bind('<Button-1>', functools.partial(show_help, msg=msg))
     return l
 
@@ -102,6 +193,14 @@ def invalid_value(W, warning):
         widget.focus_set()
 
 
+# def counter(fn):
+#     '''Wrapper to keep track of number of calls to a function'''
+#     def counted(*args, **kwargs):
+#         counted.ncalls += 1
+#         return fn(*args, **kwargs)
+#     counted.ncalls = 0
+#     return counted
+
 class Capturing(list):
     '''Capture stdout. The target of the as-clause of a with statement can
     be passed to subsequent invocations of this context manager.
@@ -117,32 +216,46 @@ class Capturing(list):
 
 class MainFrame(ttk.Frame):
     '''Main application window'''
-    counties = sorted(konstants.coastal + konstants.inland)
-    details_keys = ('date', 'block', 'rate', 'strip', 'center', 'regno', 'method')
-    details_text = OrderedDict(zip(details_keys, (
-        'Application date (yyyy-mm-dd):',
-        'Application block size (acres):',
-        'Product application rate (using treated acreage):',
-        'Strip or bed bottom width (inches):',
-        'Center-to-center row spacing (inches):',
-        'Registration Number:',
-        'Application method:')))
-    # main_keys = ['date', 'name', 'number', 'loc', 'county', 'overlap', 'apps']
-    main_text = [
-        'Date of Determination:',
-        'Permittee Name:',
-        'Permittee Number:',
-        'Site Location:',
+    counties = sorted(appk.coastal + appk.inland)
+    main_text = (
+        'Date of determination:',
+        'Permittee name:',
+        'Permittee number:',
+        'Site location:',
         'County:',
         'Overlapping applications:',
-        'Applications:']
+        'Applications:'
+    )
+    details_text = OrderedDict(
+        zip(
+            (
+                'broad_opt',
+                'date',
+                'block',
+                'rate',
+                'strip',
+                'center',
+                'regno',
+                'method'
+            ),
+            (
+                'Directly input broadcast-equivalent application rate:',
+                'Application date (yyyy-mm-dd):',
+                'Application block size (acres):',
+                'Product application rate:',
+                'Strip or bed-bottom width (inches):',
+                'Center-to-center row spacing (inches):',
+                'Registration number:',
+                'Application method:'
+            )
+        )
+    )
 
     try:  # http://effbot.org/pyfaq/why-do-my-tkinter-images-not-appear.htm
         base_path = sys._MEIPASS
     except:
         base_path = os.getcwd()
     products = read_csv(base_path, 'chloropicrin_products.csv')
-
 
     def __init__(self, parent, *args, **kwargs):
         '''https://stackoverflow.com/questions/4140437/interactively-
@@ -165,7 +278,7 @@ class MainFrame(ttk.Frame):
         validation.html for step-by-step instructions and possible values for
         validation
 
-        For more on calling parent-class init, see
+        For more on calling parent-class init and old-style classes, see
         http://stupidpythonideas.blogspot.com/2013/12/whats-deal-with-
         ttkframeinitself-parent.html
         '''
@@ -177,22 +290,26 @@ class MainFrame(ttk.Frame):
             Clear county-combobox widget'''
             warning = (
                 'The county you entered is invalid. Ensure that you enter '
-                'a valid county or select one from the dropdown list.')
+                'a valid county or select one from the dropdown list.'
+            )
             invalid_value(W, warning)
 
         ttk.Frame.__init__(self, parent, *args, **kwargs)
 
         # Create and position mainframe labels
         for i,t in enumerate(self.main_text):
-            ttk.Label(self, text=t).grid(
-                    row=i, column=0, columnspan=2, sticky='W')
+            ttk.Label(self, text=t
+            ).grid(row=i, column=0, columnspan=2, sticky='W')
 
         # Create and position useless mainframe widgets
-        UselessWidgets = namedtuple('UselessWidgets',
-            ['date', 'permittee_name', 'permittee_num', 'site_loc'])
+        UselessWidgets = namedtuple(
+            'UselessWidgets',
+            ['date', 'permittee_name', 'permittee_num', 'site_loc']
+        )
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         useless = [ttk.Label(self, text=now)] + [
-            ttk.Entry(self) for _ in range(3)]
+            ttk.Entry(self) for _ in range(3)
+        ]
         self.useless = UselessWidgets(*useless)
         for i,v in enumerate(self.useless):
             v.grid(row=i, column=2, sticky='WE')
@@ -200,8 +317,13 @@ class MainFrame(ttk.Frame):
         # Create and position mainframe county combobox
         vcmd = (self.register(validate_county), '%P')
         invcmd = (self.register(invalid_county), '%W')
-        self.county = ttk.Combobox(self, values=self.counties, validate='focusout',
-            validatecommand=vcmd, invalidcommand=invcmd)
+        self.county = ttk.Combobox(
+            self,
+            values=self.counties,
+            validate='focusout',
+            validatecommand=vcmd,
+            invalidcommand=invcmd
+        )
         county_row = self.main_text.index('County:')
         self.county.grid(row=county_row, column=2, sticky='WE')
 
@@ -213,114 +335,146 @@ class MainFrame(ttk.Frame):
         # self.overlap.invoke()  # Toggles state of Checkbutton
 
         # Create, position, and bind help-labels:
-        photo_path = os.path.join(self.base_path, 'help.gif')
-        self.photo = tk.PhotoImage(file=photo_path).subsample(30,30)
-        make_help_label(self, row=county_row, column=3, msg=konstants.county_msg, photo=self.photo)
-        make_help_label(self, row=overlap_row, column=3, msg=konstants.overlap_msg, photo=self.photo)
+        help_photo_path = os.path.join(self.base_path, 'help.gif')
+        self.photo = tk.PhotoImage(file=help_photo_path
+        ).subsample(30,30)
+        make_help_label(
+            self,
+            row=county_row,
+            column=3,
+            msg=county_msg,
+            photo=self.photo
+        )
+        make_help_label(
+            self,
+            row=overlap_row,
+            column=3,
+            msg=overlap_msg,
+            photo=self.photo
+        )
 
-        # Create movable action buttons (don't position yet)
+        # Create movable widgets (don't position yet)
         self.movable = {}
-        self.movable['adder'] = ttk.Button(self, text='+', command=self.add_button)
-        self.movable['remover'] = ttk.Button(self, text='-', command=self.rm_button)
-        self.movable['submitter'] = ttk.Button(self, text='Calculate buffer zones',
-            command=self._run)
+        self.movable['adder'] = ttk.Button(
+            self,
+            text='+',
+            command=self.add_button
+        )
+        self.movable['remover'] = ttk.Button(
+            self,
+            text='-',
+            command=self.rm_button
+        )
+        self.movable['submitter'] = ttk.Button(
+            self,
+            text='Calculate buffer zones',
+            command=self._run
+        )
+        self.movable['submitter_help'] = make_help_label(self,
+                                                         app_msg,
+                                                         self.photo
+                                                         )
+
+        logo_photo_path = os.path.join(self.base_path, 'EM-Large Logo.gif')
+        self.logophoto = tk.PhotoImage(file=logo_photo_path
+        ).subsample(6,6)
+        self.movable['logo'] = ttk.Label(self, image=self.logophoto)
 
         # Other instance variables
         self.root = self.winfo_toplevel()
         self.applications = []
         self.details = []
 
-    def add_button(self):
-        '''Add button for an application, provided details have been added'''
-        def hide_main(self, idx):
-            '''Open window to input application-specific parameters'''
-            self.details[idx].geometry(self.root.geometry())
-            self.details[idx].deiconify()  # show application window
-            self.root.withdraw()
+    def _hide_main(self, idx):
+        '''Open window to input application-specific parameters'''
+        details = self.details[idx]
+        details.geometry(self.root.geometry())  # Sync windows' dimensions
+        details.deiconify()  # show application window
+        self.root.withdraw()  # hide main window
 
-        # Create application button
+    def add_button(self):
+        '''Create app details window, button to switch to app details window,
+        and labels on main screen showing details'''
+        def init_main_details(text, row, column):
+            lab = ttk.Label(self, text=text)
+            lab.grid(row=row, column=column, sticky='W')
+            return lab
+
+        def strip_units(s):
+            return ''.join(re.split(' \(.*\)', s))
+
         idx = len(self.applications)
         app_number = idx + 1
-        text = 'Application {} Details'.format(app_number)
+        main_details = {k:v for k,v in self.details_text.items()
+            if k != 'broad_opt'
+        }
+        button_row = len(self.main_text) + (
+            idx * (len(main_details) + 1)
+        )
+
         button = ttk.Button(
-            self, text=text, command=functools.partial(hide_main, self, idx))
+            self,
+            text='Application {} details'.format(app_number),
+            command=functools.partial(self._hide_main, idx)
+        )
+        button.grid(row=button_row, column=2, sticky='WE')
         self.applications.append(button)
 
-        # Create Details object. Note that it will update button.details'
-        # text with inputs when it is hidden
-        self.details.append(
-            Details(self, app_number))
-        button.details_labels = [ttk.Label(self, text=v) for _,v in self.details_text.items()]
-        button.details = [ttk.Label(self, text='') for _ in self.details_text.keys()]
+        button.details_labels = OrderedDict(
+            (k, init_main_details(strip_units(v), button_row+i+1, 2))
+            for i, (k,v) in enumerate(main_details.items())
+        )
+        button.details = OrderedDict(
+            (k, init_main_details('', button_row+i+1, 3))
+            for i, (k,v) in enumerate(main_details.items())
+        )
 
-        # Display new button and (initially empty) inputs underneath
-        button_row = len(self.main_text) + (idx * (len(self.details_text) + 1))
-        button.grid(row=button_row, column=2, sticky='WE')
-        for i, dl in enumerate(button.details_labels):
-            dl.grid(row=button_row + i + 1, column=2, sticky='W')
-            button.details[i].grid(
-                row=button_row + i + 1, column=3, sticky='W')
+        self.details.append(Details(self, app_number))
 
-        self._adjust_buttons(button_row)  # Adjust movable buttons
+        self._adjust_buttons(button_row)
 
     def rm_button(self):
-        '''Remove newest app button and associated widgets, if multiple
+        '''Destroy newest app button and associated widgets, if multiple
         buttons exist'''
         idx = len(self.applications)
-    
+
         if idx > 1:
-            # Destroy all objects for this application
             button = self.applications.pop()
-            for i, dl in enumerate(button.details_labels):
-                dl.destroy()
-                button.details[i].destroy()
+            button_row = len(self.main_text) + ((idx - 2) * (
+                len(button.details) + 1))
+            for k,v in button.details_labels.items():
+                v.destroy()
+                button.details[k].destroy()
             button.destroy()
             details = self.details.pop()
             details.destroy()
-
-            # Adjust movable buttons
-            button_row = len(self.main_text) + ((idx - 2) * (len(self.details_text) + 1))
             self._adjust_buttons(button_row)
 
     def _adjust_buttons(self, row):
         '''Adjust other buttons to accommodate new/rm application button'''
-        offset = row + len(self.details_text) + 1
+        offset = row + len(self.applications[-1].details) + 1
 
-        # Movable action buttons
         self.movable['adder'].grid(row=row, column=0)
         self.movable['remover'].grid(row=row, column=1)
-        self.movable['submitter'].grid(row=offset, column=2, sticky='WE',
-            pady=25)  # Add space between rows. (padx shirnks widget width.)
-
-        # The only help button that moves around
-        if not hasattr(self, 'submitter_help'): 
-            self.submitter_help = make_help_label(  
-                self, row=offset, column=3, msg=konstants.app_msg, photo=self.photo)
-        else:
-            self.submitter_help.grid(row=offset, column=3, sticky='W')
-            
-        # DPR Logo
-        if not hasattr(self, 'logo'):
-            photo_path = os.path.join(self.base_path, 'dprlogo_3.gif')
-            self.logophoto = tk.PhotoImage(file=photo_path).subsample(3,3)
-            self.logo = ttk.Label(self, image=self.logophoto)
-        self.logo.grid(row=offset+1, column=0, columnspan=4, sticky='EW')
+        self.movable['submitter'].grid(
+            row=offset,
+            column=2,
+            sticky='WE',
+            pady=25
+        )  # Add space between rows. (padx shirnks widget width.)
+        self.movable['submitter_help'].grid(row=offset, column=3, sticky='W')
+        self.movable['logo'].grid(
+            row=offset+1, column=0, columnspan=4,
+            sticky=tk.N+tk.E+tk.S+tk.W)
 
     def _run(self):
-        '''Run command line script (appk.py) for buffer zone calculation
-
-        NOTE: tkinter.Entry.get is the method used by all widgets
-        NOTE: argparse.ArgumentParser.parse_args requires a flat list
-        '''
+        '''Run command line script (appk.py) for buffer zone calculation'''
         def show_results(results):
-            messagebox.showinfo('Buffer Zone Determination', results)
+            messagebox.showinfo('Buffer-zone Determination', results)
 
         def get_app_num(app):
             num = app['number']
             return num if isinstance(num, int) else int(num[0])
-
-        def split_list(li, length):
-            return [li[i:i+rpw] for i in range(0, len(li), length)]
 
         # Extract values from main and application widgets
         recalc = True if self.overlap_var.get() else False
@@ -341,14 +495,16 @@ class MainFrame(ttk.Frame):
 
         # Display results
         if recalc:
-            show_results(konstants.mod_msg)
+            show_results(mod_msg)
         apps = sorted(apps, key=get_app_num)
-        rpw = 3  # results per window
-        split_list_rpw = functools.partial(split_list, length=rpw)
-        apps_split = split_list_rpw(apps)
-        for i,group in enumerate(apps_split):
+        rpw = 5  # results per window
+        apps_split = [apps[i:i+rpw] for i in range(0, len(apps), rpw)]
+        for i, group in enumerate(apps_split):
             results = self._construct_results(
-                group, i+1, len(apps_split))
+                group,
+                i+1,
+                len(apps_split)
+            )
             show_results(results)
 
     @staticmethod
@@ -359,10 +515,12 @@ class MainFrame(ttk.Frame):
         '''Verify that the county has been entered (fully)'''
         county = self.county.get()
         if not county or county not in self.counties:
-            warning = ('Please specify the county in which the '
-                    'application(s) will take place. Ensure that the '
-                    'county is fully typed out or else is selected '
-                    'from the dropdown.')
+            warning = (
+                'Please specify the county in which the '
+                'application(s) will take place. Ensure that the '
+                'county is fully typed out or else is selected '
+                'from the dropdown.'
+            )
             self._prompt(warning)
             return False
         return county
@@ -370,57 +528,65 @@ class MainFrame(ttk.Frame):
     def _verify_details(self):
         '''Verify that each application with a details window has all
         details, retrieve widget values for appk.py, use value of
-        registration number to retrieve relevant values from the 
+        registration number to retrieve relevant values from the
         products table, and convert numeric strings to numeric'''
-        warning = (
-            'Application(s) {} are missing necessary '
-            'details. Please fill out all of the fields '
-            'listed in each application window.')    
-        
-        def check_app_details(widgets_dict, app_num):
+        def check_app_details(d, app_num):
             '''NOTE: tk.Combobox.get is in fact tk.Entry.get'''
 
             def check_detail(widget):
-                ### Can I just use widget.get()? ###
-                user_input = tk.Entry.get(widget)
+                user_input = widget.get()
                 try:
                     return float(user_input)
                 except ValueError:
                     return user_input
 
-            app = {k:check_detail(v) for k,v in widgets_dict.items()}
+            app = {
+                k:check_detail(v) for k,v in d.app_details.items()
+                if k != 'broad_opt'
+            }
+            app['broad_opt'] = d.broad_opt_var.get()
 
-            if not all(app.values()):
+            exclude = ['broad_opt']
+            if app['broad_opt']:
+                exclude += ['strip', 'center']
+            if not all(v for k,v in app.items() if k not in exclude):
                 return False
 
             prod_idx = self.products['SHOW_REGNO'].index(app['regno'])
             app['number'] = app_num
             app['density'] = float(
-                self.products['Density (lb/gallon)'][prod_idx])
+                self.products['Density (lb/gallon)'][prod_idx]
+            )
             app['percent'] = float(
-                self.products['PRODCHEM_PCT'][prod_idx])
+                self.products['PRODCHEM_PCT'][prod_idx]
+            )
             app['name'] = self.products['PRODUCT_NAME'][prod_idx]
 
             return app
-        
-        apps = [check_app_details(d.app_details, i+1) 
-            for i,d in enumerate(self.details)]
+
+        warning = (
+            'Application(s) {} are missing necessary details. Please fill out '
+            'all of the fields listed in each application window.'
+        )
+        apps = [check_app_details(d, i+1) for i,d in enumerate(self.details)]
         missing = [str(i+1) for i,a in enumerate(apps) if not a]
         if missing:
             self._prompt(
                 warning.format(
-                    ', '.join(missing)))
+                    ', '.join(missing)
+                )
+            )
             return False
-
         return apps
 
     def _tbl_num(self, method):
         '''Return table used to determine buffer,
         as listed in Appendix K'''
         county = self.county.get()
-        files = (konstants.coastal_csv if county in konstants.coastal
-            else konstants.inland_csv)
-        file = files[konstants.app_methods[1:].index(method)]
+        files = (
+            appk.coastal_csv if county in appk.coastal else appk.inland_csv
+        )
+        file = files[appk.app_methods[1:].index(method)]
         prefix = file.split('.')[0]
         re_list = re.split('(\d+)', prefix)
         list_filt = [s for s in re_list if s]
@@ -430,35 +596,38 @@ class MainFrame(ttk.Frame):
                 tbl += ' {}'.format(s)
             else:
                 tbl += s
-        return tbl    
+        return tbl
 
-    def _construct_results(self, apps, win_num=None, win_num_max=None, results=''):
+    def _construct_results(self, apps, win_num=None, win_num_max=None,
+        results=''):
         template = (
             'Application {}:\n'
-            'Product Name: {}\n'
-            'Buffer zone distance: {} feet\n'
+            'Product: {}\n'
+            'Buffer-zone distance: {} feet\n'
             '(Calculated using {}, a broadcast-equivalent rate '
             'of {} lbs A.I./acre and an application '
-            'block of {} acres.)\n\n')
-
+            'block of {} acres.)\n\n'
+        )
+        # Products spreadsheet has 3 sig digs, but only 1 shown
         for app in apps:
             results += template.format(
                 app['number'],
-                app['name'],
+                '{} ({})'.format(app['regno'], app['name']),
                 app['buffer'],
                 self._tbl_num(app['method']),
-                konstants.truncate(app['broadcast'], n=1),
-                konstants.truncate(app['block'], n=1))
-
+                appk.truncate(app['broadcast'], n=1),
+                appk.truncate(app['block'], n=1)
+            )
         if win_num and win_num_max:
             results += 'Results {} of {}'.format(
-                win_num, win_num_max)
+                win_num, win_num_max
+            )
         return results
+
 
 class Details(tk.Toplevel):
     '''Window for filling in application details'''
-
-    def __init__(self, mainframe, app_number):        
+    def __init__(self, mainframe, app_number):
         def validate_date(P):
             '''Ensure yyyy-mm-dd format'''
             try:
@@ -471,7 +640,7 @@ class Details(tk.Toplevel):
                 return True
 
         def validate_app_method(P):
-            return P in konstants.app_methods
+            return P in appk.app_methods
 
         def validate_regno(P):
             return P in self.mainframe.products['SHOW_REGNO']
@@ -499,20 +668,103 @@ class Details(tk.Toplevel):
             Clear date-entry widget'''
             warning = (
                 'The date you entered is invalid. Ensure that you enter '
-                'a valid date in the "yyyy-mm-dd" format.')
+                'a valid date in the "yyyy-mm-dd" format.'
+            )
             invalid_value(W, warning)
 
         def invalid_app_method(W):
             warning = (
-                'The application method you entered is invalid. Ensure that you enter '
-                'a valid method or select one from the dropdown list.')
+                'The application method you entered is invalid. Ensure that '
+                'you enter a valid method or select one from the dropdown '
+                'list.'
+            )
             invalid_value(W, warning)
 
         def invalid_regno(W):
             warning = (
-                'The registration number you entered is invalid. Ensure that you enter '
-                'a valid registration number or select one from the dropdown list.')
+                'The registration number you entered is invalid. Ensure that '
+                'you enter a valid registration number or select one from the '
+                'dropdown list.'
+            )
             invalid_value(W, warning)
+
+        # @counter
+        def create_custom(validate_fn, invalid_fn, widget, *args,
+            **kwargs):
+            '''Create non-default (or non-entry) widgets. See `entries`.'''
+            vcmd = (self.register(validate_fn), '%P')
+            invcmd = (self.register(invalid_fn), '%W')
+            return widget(self,
+                          validate='focusout',
+                          validatecommand=vcmd,
+                          invalidcommand=invcmd,
+                          *args,
+                          **kwargs
+            )
+
+        def hide():
+            '''Update mainframe labels with input details and hide window.'''
+            button = self.mainframe.applications[self.app_number - 1]
+            apps = {k:self.app_details[k].get() for k in button.details.keys()}
+            units = self.app_details['units'].get()
+
+            apps['block'] += ' acres' if apps['block'] else ''
+
+            if not (apps['rate'] and units):
+                apps['rate'] = ''
+                apps['units'] = ''
+            else:
+                apps['rate'] +=  ' ' + units
+
+            apps['strip'] += ' inches' if apps['strip'] else ''
+            apps['center'] += ' inches' if apps['center'] else ''
+
+            regno = apps['regno']
+            if regno:
+                products = self.mainframe.products
+                prod_idx = products['SHOW_REGNO'].index(regno)
+                name = products['PRODUCT_NAME'][prod_idx]
+                apps['regno'] += ' ' + '({})'.format(name)
+
+            if self.broad_opt_var.get():
+                apps['strip'] = 'N/A'
+                apps['center'] = 'N/A'
+
+            for k,v in button.details.items():
+                v.configure(text=apps[k])
+
+            self.mainframe.root.geometry(self.geometry())
+            self.mainframe.root.deiconify()  # show main frame
+            self.withdraw()
+
+        def cb_cmd(button, toggle=[False]):
+            '''Modify app to reflect direct input of broadcast rate'''
+            toggle[0] = not toggle[0]
+
+            app = self.app_details
+            strip, center = app['strip'], app['center']
+            if toggle[0]:
+                strip.delete(0, tk.END)
+                center.delete(0, tk.END)
+                state = 'disabled'
+                text = 'Broadcast-equivalent application rate:'
+                msg = broad_msg
+            else:
+                state = 'normal'
+                text = self.mainframe.details_text['rate']
+                msg = self.details_msgs['rate']
+
+            strip.configure(state=state)
+            center.configure(state=state)
+            self.labels['rate'].configure(text=text)
+            button.details_labels['rate'].configure(text=text)
+            row = list(self.mainframe.details_text.keys()).index('rate')
+            self.help['rate'] = make_help_label(self,
+                                                row=row,
+                                                column=2,
+                                                msg=msg,
+                                                photo=self.mainframe.photo
+                                                )
 
         # Configure window properties
         if sys.platform == 'darwin':  # http://wiki.tcl.tk/44444
@@ -524,120 +776,93 @@ class Details(tk.Toplevel):
         # user clicks the associated application button on main screen
         self.withdraw()
 
+        # Constants and attributes
         self.mainframe = mainframe
         self.title('Appendix K - Application {} Details'.format(app_number))
         self.app_number = app_number
 
-        keys = [k for k in self.mainframe.details_keys if k != 'date']
-        self.msgs = OrderedDict(zip(keys, [
-            konstants.block_size_msg,
-            konstants.rate_msg,
-            konstants.strip_msg,
-            konstants.center_msg,
-            konstants.regno_msg,
-            konstants.method_msg]))
-
         # Create and position label widgets
-        for i, v in enumerate(mainframe.details_text.values()):
-            ttk.Label(self, text=v).grid(row=i, column=0, sticky='W')
+        self.labels = OrderedDict((k, ttk.Label(self, text=v) )
+            for k,v in self.mainframe.details_text.items())
+        for i,v in enumerate(self.labels.values()):
+            v.grid(row=i, column=0, sticky='W')
 
-        # Create date entry
-        custom_details = 0
-        vcmd = (self.register(validate_date), '%P')
-        invcmd = (self.register(invalid_date), '%W')
-        date = ttk.Entry(self, validate='focusout', validatecommand=vcmd,
-            invalidcommand=invcmd)
-        custom_details += 1
-
-        # Create combobox widget for registration-number input
-        vcmd = (self.register(validate_regno), '%P')
-        invcmd = (self.register(invalid_regno), '%W')
-        regno = ttk.Combobox(self,
-                             width=40,
-                             values= mainframe.products['SHOW_REGNO'],
-                             validate='focusout',
-                             validatecommand=vcmd,
-                             invalidcommand=invcmd)
-        custom_details += 1
-
-        # Create combobox widget for application-method input
-        vcmd = (self.register(validate_app_method), '%P')
-        invcmd = (self.register(invalid_app_method), '%W')
-        app_method = ttk.Combobox(self,
-                                  width=40,
-                                  values=konstants.app_methods,
-                                  validate='focusout',
-                                  validatecommand=vcmd,
-                                  invalidcommand=invcmd)
-        custom_details += 1
-
-        # Create entry widgets for all but one input (see below)
+        # Create and position non-label widgets
+        # ncustom = create_custom.ncalls
+        details_keys = self.mainframe.details_text.keys()
+        app_details = OrderedDict.fromkeys(details_keys)
+        self.broad_opt_var = tk.IntVar()
+        cb_cmd = functools.partial(cb_cmd,
+            button=self.mainframe.applications[app_number-1])
+        app_details['broad_opt'] = ttk.Checkbutton(self,
+            variable=self.broad_opt_var, command=cb_cmd)
+        app_details['date'] = create_custom(validate_date, invalid_date,
+            ttk.Entry)
+        app_details['regno'] = create_custom(validate_regno, invalid_regno,
+            ttk.Combobox, width=40, values=mainframe.products['SHOW_REGNO'])
+        app_details['method'] = create_custom(validate_app_method,
+            invalid_app_method, ttk.Combobox, width=40,
+            values=appk.app_methods)
         vcmd = (self.register(validate_entry), '%P')
-        entries = [ttk.Entry(self, validate='key', validatecommand=vcmd)
-            for _ in range(len(mainframe.details_text)-custom_details)]
-
-        # Collect (i.e., into a OrderedDict) and position widgets
-        entries.insert(mainframe.details_keys.index('date'), date)
-        entries.insert(mainframe.details_keys.index('regno'), regno)
-        entries.insert(mainframe.details_keys.index('method'), app_method)
-        for e in entries:  # Fix tab order (defaults to creation order)
-            e.lift()
-        self.app_details = OrderedDict(zip(
-            mainframe.details_text.keys(),
-            entries))
-        for i, v in enumerate(self.app_details.values()):
-            v.grid(row=i, column=1, sticky='WE')
-
-        # Create and position help labels for inputs
-        for k,v in self.msgs.items():
-            i = mainframe.details_keys.index(k)
-            make_help_label(self, row=i, column=2, msg=v,
-                photo=mainframe.photo)
+        for i,k in enumerate(details_keys):
+            if k not in ('broad_opt', 'date', 'regno', 'method'):
+                app_details[k] = ttk.Entry(self, validate='key',
+                    validatecommand=vcmd)
+            app_details[k].lift()  # Fix tab order (defaults to creation order)
+            app_details[k].grid(row=i, column=1, sticky='WE')
+        self.app_details = app_details
 
         # Create and position combox widget for app-method units selection
-        self.app_details['units'] = ttk.Combobox(
-            self, width=20, values=('lbs/acre', 'gal/acre'))
-        row=list(self.app_details.keys()).index('rate')
+        self.app_details['units'] = ttk.Combobox(self, width=21,
+            values=('lbs product / treated acre',
+                    'gal product / treated acre'))
+        row = list(details_keys).index('rate')
         self.app_details['units'].grid(row=row, column=3)
 
         # Create and position navigation button to main screen
-        ttk.Button(self, text='Save and Return to main screen', command=self._hide
+        ttk.Button(self,
+                   text='Save and return to main window',
+                   command=hide
                    ).grid(row=len(self.app_details), column=1, pady=20)
 
-    def _hide(self):
-        '''Update mainframe labels with input details and hide window.'''
-        ### Can I just use widget.get()? ###
-        keys = list(self.app_details.keys())
-        vals = [tk.Entry.get(k) for k in self.app_details.values()]
-
-        if vals[keys.index('rate')]:
-            vals[keys.index('rate')] +=  ' ' + vals[keys.index('units')]
-
-        regno = vals[keys.index('regno')]
-        if regno:
-            products = self.mainframe.products
-            prod_idx = products['SHOW_REGNO'].index(regno)
-            name = products['PRODUCT_NAME'][prod_idx]
-            vals[keys.index('regno')] += ' ' + '({})'.format(name)
-
-        idx = self.app_number - 1
-        button = self.mainframe.applications[idx]
-        for i, d in enumerate(button.details):
-            d.configure(text=vals[i])
-
-        self.mainframe.root.geometry(self.geometry())
-        # w, h = root.winfo_screenwidth(), root.winfo_screenheight()
-        # self.mainframe.root.geometry('{}x{}+0+0'.format(w, h))
-        self.mainframe.root.deiconify()  # show main frame
-        self.withdraw()
-
+        # Create and position help labels for inputs
+        self.details_msgs = OrderedDict(
+            zip(
+                (k for k in mainframe.details_text.keys() if k != 'date'),
+                (
+                    broad_opt_msg,
+                    block_msg,
+                    rate_msg,
+                    strip_msg,
+                    center_msg,
+                    regno_msg,
+                    method_msg
+                )
+            )
+        )
+        self.help = OrderedDict()
+        for k,v in self.details_msgs.items():
+            row = list(details_keys).index(k)
+            self.help[k] = make_help_label(self,
+                                           row=row,
+                                           column=2,
+                                           msg=v,
+                                           photo=mainframe.photo
+                                           )
+        # Logo
+        self.logo = ttk.Label(self, image=self.mainframe.logophoto)
+        self.logo.grid(
+            row=len(self.app_details)+10,
+            column=0,
+            columnspan=4,
+            sticky=tk.N+tk.E+tk.S+tk.W)
 
 #==============================================================================
 # Spawn a TCL interpreter
 #==============================================================================
 root = tk.Tk()
-root.title('Appendix K (Version June 2018)')
-root.geometry("710x500")
+root.title('Appendix K (v1.0.0)')
+root.geometry("720x500")
 center_top_level(root)
 
 #==============================================================================
@@ -650,15 +875,16 @@ center_top_level(root)
 # NOTE: Wihout a window anchor, the frame will move down after
 # deleting all added rows by a distance proportional to the number of rows
 #==============================================================================
-if sys.platform == 'darwin':  # http://wiki.tcl.tk/44444
-    canvas = tk.Canvas(root, borderwidth=0, background='#e6e6e6')
-else:
-    canvas = tk.Canvas(root, borderwidth=0)
-
+# http://wiki.tcl.tk/44444
+canvas = tk.Canvas(root, borderwidth=0, background='#e6e6e6')\
+    if sys.platform == 'darwin' else tk.Canvas(root, borderwidth=0)
 frame = MainFrame(canvas)
 frame.add_button()  # Button for a single application window
 # Function is triggered whenever the frame changes size (or location on some platforms)
-frame.bind("<Configure>", lambda event, canvas=canvas: onFrameConfigure(canvas))
+frame.bind(
+    "<Configure>",
+    lambda event, canvas=canvas: onFrameConfigure(canvas)
+)
 
 vsb = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
 vsb.pack(side="right", fill="y")
@@ -670,14 +896,19 @@ canvas.create_window((4, 4), window=frame, anchor='nw')
 #==============================================================================
 # Inform the user that the tool is intended only for chloropicrin use
 #==============================================================================
-msg = ('NOTE: This tool is only for applications of products with a chloropicrin '
-    'content of 2% or more, products containing chloropicrin and another fumigant, '
-    'or simultaneous applications of chloropicrin and another fumigant.\n\n'
-    'This tool is based on CDPR\'s "Pesticide Use Enforcement Program Standards '
-    'Compendium, Volume 3, Appendix K: Chloropicrin and Chloropicrin in '
-    'Combination with Other Products (Field Fumigant) Recommended Permit Conditions '
-    '(41st Revision - December 2017)," as well as the information at the following '
-    'web page referenced by Appendix K: https://www.cdpr.ca.gov/chloropicrin.htm.')
+msg = (
+    'This tool for testing purposes only and results from the tool should be '
+    'evaluated prior to release.  This tool only applies  to the application '
+    'of products that contain 2% or more of chloropicrin.\n\n'
+    'This tool is based on CDPR\'s "Pesticide Use Enforcement Program '
+    'Standards Compendium, Volume 3, Appendix K: Chloropicrin and '
+    'Chloropicrin in Combination with Other Products (Field Fumigant) '
+    'Recommended Permit Conditions (41st Revision - December 2017)," as well '
+    'as the information at the following web page referenced by Appendix K: '
+    'https://www.cdpr.ca.gov/chloropicrin.htm.\n\n'
+    'For questions or feedback about this tool, please contact:\n\n'
+    'Minh Pham\n(916) 445-0979\nMinh.Pham@cdpr.ca.gov'
+)
 messagebox.showinfo('Help', msg)
 
 #==============================================================================

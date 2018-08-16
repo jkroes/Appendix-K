@@ -1,10 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-Author: Justin Lawrence Kroes
-Agency: Department of Pesticide Regulation
-Branch: Environmental Monitoring
-Unit: Air Program
-Date: 4/9/18
+Copyright (c) 2018, California Department of Pesticide Regulation, All rights
+reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 import os
@@ -12,10 +34,58 @@ import functools
 import collections
 import sys
 import math
-import konstants
 import csv
 import copy
 
+app_methods = [
+    'tif strip shallow injection',  # PROHIBITED METHOD
+    'tif broadcast shank injection',
+    'tif bed injection',
+    'tif strip deep injection',
+    'tif drip',
+    'non-tif broadcast shank injection',
+    'non-tif bed injection',
+    'non-tif strip injection',  # Doc doesn't specify shallow or deep
+    'non-tif drip',
+    'untarped broadcast or strip shallow injection',  # u.b. shallow?
+    'untarped broadcast or strip deep injection',  # u.b. deep?
+    'untarped bed injection',
+    'untarped drip']  # Split into 2 arguments with fewer options?
+
+inland = [
+    'alameda', 'alpine', 'amador', 'butte', 'calaveras', 'colusa',
+    'contra costa', 'el dorado', 'fresno', 'glenn', 'imperial', 'inyo',
+    'kern', 'kings', 'lake', 'lassen', 'madera', 'mariposa', 'merced',
+    'modoc', 'mono', 'napa', 'nevada', 'placer', 'plumas', 'riverside',
+    'sacramento', 'san benito', 'san bernadino', 'san joaquin',
+    'santa clara', 'shasta', 'sierra', 'siskiyou', 'solano', 'stanislaus',
+    'sutter', 'tehama', 'trinity', 'tulare', 'tuolumne', 'yolo', 'yuba']
+
+coastal = [
+    'del norte', 'humboldt', 'los angeles', 'marin', 'mendocino',
+    'monterey', 'orange', 'san diego', 'san francisco', 'san luis obispo',
+    'san mateo', 'santa barbara', 'santa cruz', 'sonoma', 'ventura']
+
+coastal_csv = [
+    'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
+    'Table6a.csv', 'Table7a.csv', 'Table8a.csv', 'Table9a.csv',
+    'Table10a.csv', 'Table11a.csv', 'Table12.csv']
+
+inland_csv = [
+    'Table1.csv', 'Table2.csv', 'Table3.csv', 'Table4.csv', 'Table5.csv',
+    'Table6b.csv', 'Table7b.csv', 'Table8b.csv', 'Table9b.csv',
+    'Table10b.csv', 'Table11b.csv', 'Table12.csv']
+
+# assistance = ('Contact the California Department of Pesticide '
+#               'Regulation for assistance.')
+
+# assistance2 = assistance.split()[0].lower() + ' ' + ' '.join(
+#     assistance.split()[1:])
+
+assistance = (
+    'Please check that your inputs are correct. If the inputs are valid and '
+    'the problem persists, then please contact the Department of Pesticide '
+    'Regulation for Assistance')
 
 def read_tables(valid_methods):
     '''Read data tables and construct lookup for tables
@@ -42,8 +112,8 @@ def read_tables(valid_methods):
         base_path = os.getcwd()
     tables_dir = os.path.join(base_path, 'Tables', '112017')
     read_tabular = functools.partial(read_tabular, tables_dir)
-    coastal_tbls = [read_tabular(csv) for csv in konstants.coastal_csv]
-    inland_tbls = [read_tabular(csv) for csv in konstants.inland_csv]
+    coastal_tbls = [read_tabular(csv) for csv in coastal_csv]
+    inland_tbls = [read_tabular(csv) for csv in inland_csv]
     lookup_tbl = collections.defaultdict(dict)
     for i, v in enumerate(valid_methods):
         lookup_tbl[v]['coastal'] = coastal_tbls[i]
@@ -78,6 +148,7 @@ def recalculate(apps, cb_list):
     new = {}
     new['number'] = ', '.join(str(a['number']) for a in apps)
     new['name'] = ', '.join(str(a['name']) for a in apps)
+    new['regno'] = ', '.join(str(a['regno']) for a in apps)
     new['block'] = acreage
     new['broadcast'] = max_broad
     new['method'] = apps[idx]['method']
@@ -94,7 +165,7 @@ def calculate_buffer(app, county_type, lookup):
         '''
         error_msg = (
             '{} ({} {}) exceeds maximum allowable {} ({} {}). '
-            ) + konstants.assistance
+            ) + assistance
 
         diffs = [diff for diff in map(lambda x: param - x, indices)]
         try:
@@ -102,7 +173,7 @@ def calculate_buffer(app, county_type, lookup):
         except ValueError:
             print(error_msg.format(
                     strings[0],
-                    konstants.truncate(param, 1),
+                    truncate(param, 1),
                     strings[1],
                     strings[2],
                     indices[-1],
@@ -113,7 +184,8 @@ def calculate_buffer(app, county_type, lookup):
 
     # Lookup correct table for combination of application method and county
     vals, rates, acreage = lookup[app['method']][county_type]
-    rate_strings = ['Broadcast equivalent application rate', 'lbs AI/acre', 'rate']
+    rate_strings = ['Broadcast equivalent application rate', 'lbs AI/acre',
+         'rate']
     closest_idx_rate = closest_idx(app['broadcast'], rates, rate_strings)
     acre_strings = ['Application block size', 'acres', 'block size']
     closest_idx_acre = closest_idx(app['block'], acreage,
@@ -122,55 +194,80 @@ def calculate_buffer(app, county_type, lookup):
     if math.isnan(buffer):  # Verify that value is not NA
         print(
             'Based on the inputs, one or more buffer zones would exceed the '
-            'maximum size of half a mile. ' + konstants.assistance)
+            'maximum size of half a mile. ' + assistance)
         sys.exit()
-    
+
     return int(buffer)
 
 
 def broadcast_equiv_calc(app):
     '''Convert product application rate to broadcast-
     equivalent rate, converting units if necessary.
-    Note that broadcast is given in units of lbs 
+    Note that broadcast is given in units of lbs
     product/acre in product labels, but as lbs
     AI/acre in Appendix K's tables.
     '''
     rate_ai = app['rate'] * app['percent'] / 100
-    if app['units'] == 'gal/acre':
+    if app['units'] == 'gal product / treated acre':
         rate_ai *= app['density']
+
+    if app['broad_opt']:
+        app['strip'], app['center'] = 1, 1
 
     broadcast = rate_ai * app['strip'] / app['center']
 
     return broadcast
 
-def split_list(li, methods):
-    return [el for el in li if el['method'] in methods]
+def check_total_acreage(apps, tarp_type, limit):
+    '''Individual application blocks are limited to 60 and 40 acres, resp.,
+    for TIF and non-TIF/untarped apps. In addition, combined acreage is
+    limited for groups of overlapping applications, to these same values.'''
+    msg = (
+        'Groups of overlapping {} applications are limited to {} acres in '
+        'total. The total area of this group is {} acres.'
+    )
+    acreage = sum(app['block'] for app in apps)
+    if acreage > limit:
+        print(msg.format(tarp_type, limit, acreage))
+        sys.exit()
+
+
+def truncate(f, n):
+    '''Truncates/pads a float f to n decimal places without rounding'''
+    s = str(f)
+    i, _, d = s.partition('.')
+    return '.'.join([i, (d+'0'*n)[:n]])
+
 
 def main(recalc, county, applications):
     '''Main routine'''
     for app in applications:
         # Prohibited-application check
-        if app['method'] == konstants.app_methods[0]:
+        if app['method'] == app_methods[0]:
             print('TIF strip shallow injection is prohibited. ' +
-                konstants.assistance)
+                assistance)
             sys.exit()
         # Broadcast calculations
         app['broadcast'] = broadcast_equiv_calc(app)
 
     # Split applications into lists of tif and untarped/non-tif
-    tif_methods, other_methods = konstants.app_methods[1:5], konstants.app_methods[5:]
-    split_apps = functools.partial(split_list, applications)
-    tif_apps, other_apps = map(split_apps, (tif_methods, other_methods))
+    tif_methods = app_methods[:5]
+    tif_apps = [app for app in applications if app['method'] in tif_methods]
+    other_apps = [app for app in applications if app not in tif_apps]
 
-    # (Re)calculate buffers, checking acreage and broadcast rates against limits
-    lookup_table = read_tables(konstants.app_methods[1:])
-    cty_type = 'coastal' if county in konstants.coastal else 'inland'
+    # Check total acreage for overlapping applications
+    if recalc:
+        check_total_acreage(tif_apps, 'TIF', 60)
+        check_total_acreage(other_apps, 'non-TIF/untarped', 40)
+
+    # (Re)calculate buffers; check acreage and broadcast rates against limits
+    lookup_table = read_tables(app_methods[1:])
+    cty_type = 'coastal' if county in coastal else 'inland'
     args_cb = [cty_type, lookup_table]
 
-    if tif_apps:
-        tif_buffers = [calculate_buffer(app, *args_cb) for app in tif_apps]
-    else:
-        tif_buffers = []
+    tif_buffers = [calculate_buffer(app, *args_cb) for app in tif_apps
+        ] if tif_apps else []
+
     if other_apps and not recalc:
         other_buffers = [calculate_buffer(app, *args_cb) for app in other_apps]
     elif other_apps and recalc:
