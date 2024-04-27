@@ -177,8 +177,3 @@ to manifest when switching between the main window and application windows. The
 second window will not be aligned with the previously maximized window, and
 switching again will use whatever size and position the second window has at
 the time of the second switch.
-
-# Contact
-Minh Pham  
-(916) 445-0979  
-Minh.Pham@cdpr.ca.gov
